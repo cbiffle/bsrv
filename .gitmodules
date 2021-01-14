@@ -1,0 +1,3 @@
+[submodule "tools/cobble"]
+	path = tools/cobble
+	url = https://github.com/cbiffle/cobble-build
