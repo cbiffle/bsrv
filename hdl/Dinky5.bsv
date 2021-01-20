@@ -100,14 +100,15 @@ interface Dinky5#(numeric type addr_width);
 
     // Internal state of core, for debugging.
     (* always_ready *)
-    method State core_state;
+    method OneHotState core_state;
 
     // Currently latched instruction, for debugging.
     (* always_ready *)
     method Word core_inst;
 endinterface
 
-// Execution states of the CPU.
+// Execution states of the CPU. These enumerate bit positions in the actual
+// one-hot state used by the circuit.
 typedef enum {
     ResetState,     // Newly reset.
     FetchState,     // Addressing RAM to fetch instruction.
@@ -117,6 +118,16 @@ typedef enum {
     LoadState,      // Second cycle for loads.
     HaltState       // Something has gone wrong.
 } State deriving (Bits, FShow, Eq);
+
+typedef Bit#(7) OneHotState;
+
+function OneHotState onehot_state(State s);
+    return 1 << pack(s);
+endfunction
+
+function Bool is_onehot_state(OneHotState oh, State s);
+    return oh[pack(s)] != 0;
+endfunction
 
 module mkDinky5 (Dinky5#(addr_width))
 provisos (
@@ -129,7 +140,7 @@ provisos (
     // State elements.
 
     // State of execution state machine.
-    Reg#(State) state <- mkReg(ResetState);
+    Reg#(OneHotState) state <- mkReg(onehot_state(ResetState));
     // Address of current instruction. Note that this is a word address, not a
     // byte address, so it is missing its two LSBs.
     Reg#(Bit#(addr_width)) pc <- mkReg(0);
@@ -187,34 +198,37 @@ provisos (
     ///////////////////////////////////////////////////////////////////////////
     // Core execution rules.
 
+    // Explain our use of one-hot state encoding to the compiler.
+    (* mutually_exclusive = "leave_reset, fetch, read_reg_1, read_reg_2, execute, finish_load" *)
+
     (* fire_when_enabled, no_implicit_conditions *)
-    rule leave_reset (state matches ResetState);
-        state <= FetchState;
+    rule leave_reset (is_onehot_state(state, ResetState));
+        state <= onehot_state(FetchState);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule fetch (state matches FetchState);
-        state <= Reg1State;
+    rule fetch (is_onehot_state(state, FetchState));
+        state <= onehot_state(Reg1State);
         mem_addr_port <= pc;
     endrule
 
     // Implicit condition: mem result port valid
     (* fire_when_enabled *)
-    rule read_reg_1 (state matches Reg1State);
+    rule read_reg_1 (is_onehot_state(state, Reg1State));
         inst <= mem_result_port;
         rf_rs <= mem_result_port[19:15];
-        state <= Reg2State;
+        state <= onehot_state(Reg2State);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule read_reg_2 (state matches Reg2State);
+    rule read_reg_2 (is_onehot_state(state, Reg2State));
         x1 <= rf_result;
         rf_rs <= inst[24:20];
-        state <= ExecuteState;
+        state <= onehot_state(ExecuteState);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule execute (state matches ExecuteState);
+    rule execute (is_onehot_state(state, ExecuteState));
         let opcode = inst[6:0];
         let funct3 = inst[14:12];
         let funct7 = inst[31:25];
@@ -234,18 +248,18 @@ provisos (
             // LUI
             'b0110111: begin
                 rf_wr <= tuple2(rd, imm_u);
-                state <= FetchState;
+                state <= onehot_state(FetchState);
             end
             // AUIPC
             'b0010111: begin
                 rf_wr <= tuple2(rd, extend(pc00) + imm_u);
-                state <= FetchState;
+                state <= onehot_state(FetchState);
             end
             // JAL
             'b1101111: begin
                 rf_wr <= tuple2(rd, extend(pc00));
                 next_pc = truncateLSB(pc00 + truncate(imm_j));
-                state <= FetchState;
+                state <= onehot_state(FetchState);
             end
             // JALR
             'b1100111: begin
@@ -253,7 +267,7 @@ provisos (
                 Word full_ea = x1 + imm_i;
                 Bit#(xlen_m2) word_ea = truncateLSB(full_ea);
                 next_pc = truncate(word_ea);
-                state <= FetchState;
+                state <= onehot_state(FetchState);
             end
             // Bxx
             'b1100011: begin
@@ -267,7 +281,7 @@ provisos (
                     default: return ?;
                 endcase;
                 if (condition) next_pc = truncateLSB(pc00 + truncate(imm_b));
-                state <= FetchState;
+                state <= onehot_state(FetchState);
             end
             // Lx
             'b0000011: begin
@@ -276,9 +290,9 @@ provisos (
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
                         mem_addr_port <= truncate(word_ea);
-                        state <= LoadState;
+                        state <= onehot_state(LoadState);
                     end
-                    default: state <= HaltState;
+                    default: state <= onehot_state(HaltState);
                 endcase
             end
             // Sx
@@ -290,9 +304,9 @@ provisos (
                         mem_addr_port <= truncate(word_ea);
                         mem_data_port <= rf_result;
                         mem_write_port.send;
-                        state <= FetchState;
+                        state <= onehot_state(FetchState);
                     end
-                    default: state <= HaltState;
+                    default: state <= onehot_state(HaltState);
                 endcase
             end
             // ALU immediate
@@ -314,7 +328,7 @@ provisos (
                     'b111: return x1 & imm_i;
                 endcase;
                 rf_wr <= tuple2(rd, alu_result);
-                state <= FetchState;
+                state <= onehot_state(FetchState);
             end
             // ALU reg
             'b0110011: begin
@@ -338,10 +352,10 @@ provisos (
                     'b111: return x1 & rf_result;
                 endcase;
                 rf_wr <= tuple2(rd, alu_result);
-                state <= FetchState;
+                state <= onehot_state(FetchState);
             end
             default: begin
-                state <= HaltState;
+                state <= onehot_state(HaltState);
             end
         endcase
 
@@ -350,10 +364,10 @@ provisos (
 
     // Implicit condition: mem result port valid
     (* fire_when_enabled *)
-    rule finish_load (state matches LoadState);
+    rule finish_load (is_onehot_state(state, LoadState));
         let rd = inst[11:7];
         rf_wr <= tuple2(rd, mem_result_port);
-        state <= FetchState;
+        state <= onehot_state(FetchState);
     endrule
 
     ///////////////////////////////////////////////////////////////////////////
@@ -367,7 +381,7 @@ provisos (
         mem_result_port <= value;
     endmethod
 
-    method State core_state;
+    method OneHotState core_state;
         return state;
     endmethod
 
