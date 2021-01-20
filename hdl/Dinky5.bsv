@@ -243,6 +243,15 @@ provisos (
         Word imm_b = {
             signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
+        let comp_rhs = case (opcode) matches
+            'b1100011: return rf_result; // Bxx
+            'b0110011: return rf_result; // ALU reg
+            'b0010011: return imm_i; // ALU imm
+            default: return ?;
+        endcase;
+        let signed_less_than = toSigned(x1) < toSigned(comp_rhs);
+        let unsigned_less_than = x1 < comp_rhs;
+
         // Behold, the Big Fricking RV32I Case Discriminator!
         case (opcode) matches
             // LUI
@@ -274,10 +283,10 @@ provisos (
                 let condition = case (funct3) matches
                     'b000: return x1 == rf_result;
                     'b001: return x1 != rf_result;
-                    'b100: return toSigned(x1) < toSigned(rf_result);
-                    'b101: return toSigned(x1) >= toSigned(rf_result);
-                    'b110: return x1 < rf_result;
-                    'b111: return x1 >= rf_result;
+                    'b100: return signed_less_than;
+                    'b101: return !signed_less_than;
+                    'b110: return unsigned_less_than;
+                    'b111: return !unsigned_less_than;
                     default: return ?;
                 endcase;
                 if (condition) next_pc = truncateLSB(pc00 + truncate(imm_b));
@@ -315,9 +324,9 @@ provisos (
                     'b000: return x1 + imm_i; // ADDI
                     'b001: return x1 << imm_i[4:0]; // SLLI
                     // SLTI
-                    'b010: return toSigned(x1) < toSigned(imm_i) ? 1 : 0;
+                    'b010: return signed_less_than ? 1 : 0;
                     // SLTIU
-                    'b011: return x1 < imm_i ? 1 : 0;
+                    'b011: return unsigned_less_than ? 1 : 0;
                     'b100: return x1 ^ imm_i; // XORI
                     'b101: if (funct7[5] == 0) begin // SRLI
                         return x1 >> imm_i[4:0];
@@ -339,9 +348,9 @@ provisos (
                     end
                     'b001: return x1 << rf_result[4:0]; // SLL
                     // SLT
-                    'b010: return toSigned(x1) < toSigned(rf_result) ? 1 : 0;
+                    'b010: return signed_less_than ? 1 : 0;
                     // SLTU
-                    'b011: return x1 < rf_result ? 1 : 0;
+                    'b011: return unsigned_less_than ? 1 : 0;
                     'b100: return x1 ^ rf_result; // XOR
                     'b101: if (funct7[5] == 0) begin // SRL
                         return x1 >> rf_result[4:0];
