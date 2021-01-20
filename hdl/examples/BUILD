@@ -5,3 +5,11 @@ bluespec_library('Blinky',
         'Blinky.bsv',
     ],
 )
+bluespec_library('Dinky5Soc',
+    sources = [
+        'Dinky5Soc.bsv',
+    ],
+    deps = [
+        '//hdl:Dinky5',
+    ],
+)
