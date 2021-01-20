@@ -119,12 +119,16 @@ typedef enum {
     HaltState       // Something has gone wrong.
 } State deriving (Bits, FShow, Eq);
 
+// One-hot representation of State; must have one bit for each enum
+// discriminant.
 typedef Bit#(7) OneHotState;
 
+// Converts from weighted to one-hot representation.
 function OneHotState onehot_state(State s);
     return 1 << pack(s);
 endfunction
 
+// Checks a bit in the one-hot state.
 function Bool is_onehot_state(OneHotState oh, State s);
     return oh[pack(s)] != 0;
 endfunction
@@ -169,6 +173,13 @@ provisos (
     // want to use for arithmetic.
     let pc00 = {pc, 2'b00};
 
+    // Instruction fields.
+    let inst_opcode = inst[6:0];
+    let inst_rd = inst[11:7];
+    let inst_funct3 = inst[14:12];
+    let inst_rs2 = inst[24:20];
+    let inst_funct7 = inst[31:25];
+
     ///////////////////////////////////////////////////////////////////////////
     // Core execution rules.
 
@@ -189,6 +200,9 @@ provisos (
     (* fire_when_enabled, no_implicit_conditions *)
     rule read_reg_1 (is_onehot_state(state, Reg1State));
         inst <= mem_result_port;
+        // Note that in this state, we address the register file directly from
+        // the data bus return path -- because we don't have the instruction
+        // latched yet! This is the only place where we do this.
         regfile.read(mem_result_port[19:15]);
         state <= onehot_state(Reg2State);
     endrule
@@ -196,19 +210,15 @@ provisos (
     (* fire_when_enabled, no_implicit_conditions *)
     rule read_reg_2 (is_onehot_state(state, Reg2State));
         x1 <= regfile.read_result;
-        regfile.read(inst[24:20]);
+        regfile.read(inst_rs2);
         state <= onehot_state(ExecuteState);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule execute (is_onehot_state(state, ExecuteState));
-        let opcode = inst[6:0];
-        let funct3 = inst[14:12];
-        let funct7 = inst[31:25];
-        let rd = inst[11:7];
+        let next_pc = pc + 1; // we will MUTATE this for jumps!
 
-        let next_pc = pc + 1;
-
+        // Various immediate decodes
         Word imm_i = signExtend(inst[31:20]);
         Word imm_u = {inst[31:12], 0};
         Word imm_j = {
@@ -216,11 +226,11 @@ provisos (
         Word imm_b = {
             signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
-        let rf_result = regfile.read_result;
-
-        let comp_rhs = case (opcode) matches
-            'b1100011: return rf_result; // Bxx
-            'b0110011: return rf_result; // ALU reg
+        // Try and generate no more than _two_ comparators (we got four by
+        // default).
+        let comp_rhs = case (inst_opcode) matches
+            'b1100011: return regfile.read_result; // Bxx
+            'b0110011: return regfile.read_result; // ALU reg
             'b0010011: return imm_i; // ALU imm
             default: return ?;
         endcase;
@@ -228,26 +238,26 @@ provisos (
         let unsigned_less_than = x1 < comp_rhs;
 
         // Behold, the Big Fricking RV32I Case Discriminator!
-        case (opcode) matches
+        case (inst_opcode) matches
             // LUI
             'b0110111: begin
-                regfile.write(rd, imm_u);
+                regfile.write(inst_rd, imm_u);
                 state <= onehot_state(FetchState);
             end
             // AUIPC
             'b0010111: begin
-                regfile.write(rd, extend(pc00) + imm_u);
+                regfile.write(inst_rd, extend(pc00) + imm_u);
                 state <= onehot_state(FetchState);
             end
             // JAL
             'b1101111: begin
-                regfile.write(rd, extend(pc00));
+                regfile.write(inst_rd, extend(pc00));
                 next_pc = truncateLSB(pc00 + truncate(imm_j));
                 state <= onehot_state(FetchState);
             end
             // JALR
             'b1100111: begin
-                regfile.write(rd, extend(pc00));
+                regfile.write(inst_rd, extend(pc00));
                 Word full_ea = x1 + imm_i;
                 Bit#(xlen_m2) word_ea = truncateLSB(full_ea);
                 next_pc = truncate(word_ea);
@@ -255,9 +265,9 @@ provisos (
             end
             // Bxx
             'b1100011: begin
-                let condition = case (funct3) matches
-                    'b000: return x1 == rf_result;
-                    'b001: return x1 != rf_result;
+                let condition = case (inst_funct3) matches
+                    'b000: return x1 == regfile.read_result;
+                    'b001: return x1 != regfile.read_result;
                     'b100: return signed_less_than;
                     'b101: return !signed_less_than;
                     'b110: return unsigned_less_than;
@@ -269,7 +279,7 @@ provisos (
             end
             // Lx
             'b0000011: begin
-                case (funct3) matches
+                case (inst_funct3) matches
                     'b010: begin // LW
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
@@ -281,12 +291,12 @@ provisos (
             end
             // Sx
             'b0100011: begin
-                case (funct3) matches
+                case (inst_funct3) matches
                     'b010: begin // SW
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
                         mem_addr_port <= truncate(word_ea);
-                        mem_data_port <= rf_result;
+                        mem_data_port <= regfile.read_result;
                         mem_write_port.send;
                         state <= onehot_state(FetchState);
                     end
@@ -295,7 +305,7 @@ provisos (
             end
             // ALU immediate
             'b0010011: begin
-                let alu_result = case (funct3) matches
+                let alu_result = case (inst_funct3) matches
                     'b000: return x1 + imm_i; // ADDI
                     'b001: return x1 << imm_i[4:0]; // SLLI
                     // SLTI
@@ -303,7 +313,7 @@ provisos (
                     // SLTIU
                     'b011: return unsigned_less_than ? 1 : 0;
                     'b100: return x1 ^ imm_i; // XORI
-                    'b101: if (funct7[5] == 0) begin // SRLI
+                    'b101: if (inst_funct7[5] == 0) begin // SRLI
                         return x1 >> imm_i[4:0];
                     end else begin // SRAI
                         return pack(toSigned(x1) >> imm_i[4:0]);
@@ -311,31 +321,31 @@ provisos (
                     'b110: return x1 | imm_i;
                     'b111: return x1 & imm_i;
                 endcase;
-                regfile.write(rd, alu_result);
+                regfile.write(inst_rd, alu_result);
                 state <= onehot_state(FetchState);
             end
             // ALU reg
             'b0110011: begin
-                let alu_result = case (funct3) matches
+                let alu_result = case (inst_funct3) matches
                     'b000: begin
-                        let sub = funct7[5];
-                        return x1 + (rf_result ^ signExtend(sub)) + zeroExtend(sub);
+                        let sub = inst_funct7[5];
+                        return x1 + (regfile.read_result ^ signExtend(sub)) + zeroExtend(sub);
                     end
-                    'b001: return x1 << rf_result[4:0]; // SLL
+                    'b001: return x1 << regfile.read_result[4:0]; // SLL
                     // SLT
                     'b010: return signed_less_than ? 1 : 0;
                     // SLTU
                     'b011: return unsigned_less_than ? 1 : 0;
-                    'b100: return x1 ^ rf_result; // XOR
-                    'b101: if (funct7[5] == 0) begin // SRL
-                        return x1 >> rf_result[4:0];
+                    'b100: return x1 ^ regfile.read_result; // XOR
+                    'b101: if (inst_funct7[5] == 0) begin // SRL
+                        return x1 >> regfile.read_result[4:0];
                     end else begin // SRA
-                        return pack(toSigned(x1) >> rf_result[4:0]);
+                        return pack(toSigned(x1) >> regfile.read_result[4:0]);
                     end
-                    'b110: return x1 | rf_result;
-                    'b111: return x1 & rf_result;
+                    'b110: return x1 | regfile.read_result;
+                    'b111: return x1 & regfile.read_result;
                 endcase;
-                regfile.write(rd, alu_result);
+                regfile.write(inst_rd, alu_result);
                 state <= onehot_state(FetchState);
             end
             default: begin
@@ -348,8 +358,7 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule finish_load (is_onehot_state(state, LoadState));
-        let rd = inst[11:7];
-        regfile.write(rd, mem_result_port);
+        regfile.write(inst_rd, mem_result_port);
         state <= onehot_state(FetchState);
     endrule
 
