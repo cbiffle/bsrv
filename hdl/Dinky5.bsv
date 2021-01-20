@@ -95,7 +95,7 @@ interface Dinky5#(numeric type addr_width);
     method Word mem_data;
     
     // Memory data return from bus.
-    (* always_ready *)
+    (* always_ready, always_enabled *)
     method Action mem_result(Word value);
 
     // Internal state of core, for debugging.
@@ -163,7 +163,7 @@ provisos (
     // Path from datapath to bus port for writes.
     Wire#(Word) mem_data_port <- mkDWire(?);
     // Path from bus return to datapath for reads.
-    Wire#(Word) mem_result_port <- mkWire;
+    Wire#(Word) mem_result_port <- mkBypassWire;
 
     // PC extended as a byte address, which is the version RISC-V instructions
     // want to use for arithmetic.
@@ -186,8 +186,7 @@ provisos (
         mem_addr_port <= pc;
     endrule
 
-    // Implicit condition: mem result port valid
-    (* fire_when_enabled *)
+    (* fire_when_enabled, no_implicit_conditions *)
     rule read_reg_1 (is_onehot_state(state, Reg1State));
         inst <= mem_result_port;
         regfile.read(mem_result_port[19:15]);
@@ -347,8 +346,7 @@ provisos (
         pc <= next_pc;
     endrule
 
-    // Implicit condition: mem result port valid
-    (* fire_when_enabled *)
+    (* fire_when_enabled, no_implicit_conditions *)
     rule finish_load (is_onehot_state(state, LoadState));
         let rd = inst[11:7];
         regfile.write(rd, mem_result_port);
