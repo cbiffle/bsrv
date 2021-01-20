@@ -165,35 +165,9 @@ provisos (
     // Path from bus return to datapath for reads.
     Wire#(Word) mem_result_port <- mkWire;
 
-    // Addressing signals for register file read port.
-    Wire#(RegId) rf_rs <- mkWire;
-    // Return bus for register contents.
-    Wire#(Word) rf_result <- mkBypassWire;
-    // Addressing signals for register file write port.
-    Wire#(Tuple2#(RegId, Word)) rf_wr <- mkWire;
-
     // PC extended as a byte address, which is the version RISC-V instructions
     // want to use for arithmetic.
     let pc00 = {pc, 2'b00};
-
-    ///////////////////////////////////////////////////////////////////////////
-    // RegFile operation rules.
-
-    (* fire_when_enabled *)
-    rule regfile_read_1;
-        regfile.read(rf_rs);
-    endrule
-
-    (* fire_when_enabled *)
-    rule regfile_read_2;
-        rf_result <= regfile.read_result;
-    endrule
-
-    (* fire_when_enabled *)
-    rule regfile_write (rf_wr matches {.rd, .value});
-        $display("RF WRITE x%0d <= %0h", rd, value);
-        if (rd != 0) regfile.write(rd, value);
-    endrule
 
     ///////////////////////////////////////////////////////////////////////////
     // Core execution rules.
@@ -216,14 +190,14 @@ provisos (
     (* fire_when_enabled *)
     rule read_reg_1 (is_onehot_state(state, Reg1State));
         inst <= mem_result_port;
-        rf_rs <= mem_result_port[19:15];
+        regfile.read(mem_result_port[19:15]);
         state <= onehot_state(Reg2State);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule read_reg_2 (is_onehot_state(state, Reg2State));
-        x1 <= rf_result;
-        rf_rs <= inst[24:20];
+        x1 <= regfile.read_result;
+        regfile.read(inst[24:20]);
         state <= onehot_state(ExecuteState);
     endrule
 
@@ -243,6 +217,8 @@ provisos (
         Word imm_b = {
             signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
+        let rf_result = regfile.read_result;
+
         let comp_rhs = case (opcode) matches
             'b1100011: return rf_result; // Bxx
             'b0110011: return rf_result; // ALU reg
@@ -256,23 +232,23 @@ provisos (
         case (opcode) matches
             // LUI
             'b0110111: begin
-                rf_wr <= tuple2(rd, imm_u);
+                regfile.write(rd, imm_u);
                 state <= onehot_state(FetchState);
             end
             // AUIPC
             'b0010111: begin
-                rf_wr <= tuple2(rd, extend(pc00) + imm_u);
+                regfile.write(rd, extend(pc00) + imm_u);
                 state <= onehot_state(FetchState);
             end
             // JAL
             'b1101111: begin
-                rf_wr <= tuple2(rd, extend(pc00));
+                regfile.write(rd, extend(pc00));
                 next_pc = truncateLSB(pc00 + truncate(imm_j));
                 state <= onehot_state(FetchState);
             end
             // JALR
             'b1100111: begin
-                rf_wr <= tuple2(rd, extend(pc00));
+                regfile.write(rd, extend(pc00));
                 Word full_ea = x1 + imm_i;
                 Bit#(xlen_m2) word_ea = truncateLSB(full_ea);
                 next_pc = truncate(word_ea);
@@ -336,7 +312,7 @@ provisos (
                     'b110: return x1 | imm_i;
                     'b111: return x1 & imm_i;
                 endcase;
-                rf_wr <= tuple2(rd, alu_result);
+                regfile.write(rd, alu_result);
                 state <= onehot_state(FetchState);
             end
             // ALU reg
@@ -360,7 +336,7 @@ provisos (
                     'b110: return x1 | rf_result;
                     'b111: return x1 & rf_result;
                 endcase;
-                rf_wr <= tuple2(rd, alu_result);
+                regfile.write(rd, alu_result);
                 state <= onehot_state(FetchState);
             end
             default: begin
@@ -375,7 +351,7 @@ provisos (
     (* fire_when_enabled *)
     rule finish_load (is_onehot_state(state, LoadState));
         let rd = inst[11:7];
-        rf_wr <= tuple2(rd, mem_result_port);
+        regfile.write(rd, mem_result_port);
         state <= onehot_state(FetchState);
     endrule
 
