@@ -112,8 +112,8 @@ endinterface
 typedef enum {
     ResetState,     // Newly reset.
     FetchState,     // Addressing RAM to fetch instruction.
-    Reg1State,      // Reading instruction, selecting rs1.
-    Reg2State,      // Selecting rs2.
+    Reg2State,      // Reading instruction, selecting rs2.
+    Reg1State,      // Latching x2, selecting rs1.
     ExecuteState,   // Executing first instruction cycle.
     LoadState,      // Second cycle for loads.
     HaltState       // Something has gone wrong.
@@ -151,8 +151,10 @@ provisos (
     // Latched instruction being executed -- only valid in states past
     // Reg1State!
     Reg#(Word) inst <- mkRegU;
-    // Latched first operand (contents addressed by rs1).
-    Reg#(Word) x1 <- mkRegU;
+    // Latched second operand (contents addressed by rs2).
+    Reg#(Word) x2 <- mkRegU;
+    // Latch on input to the magnitude comparator.
+    Reg#(Word) comp_rhs <- mkRegU;
 
     // General purpose registers.
     RegFile regfile <- mkRegFile;
@@ -177,7 +179,7 @@ provisos (
     let inst_opcode = inst[6:0];
     let inst_rd = inst[11:7];
     let inst_funct3 = inst[14:12];
-    let inst_rs2 = inst[24:20];
+    let inst_rs1 = inst[19:15];
     let inst_funct7 = inst[31:25];
 
     ///////////////////////////////////////////////////////////////////////////
@@ -193,25 +195,34 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule fetch (is_onehot_state(state, FetchState));
-        state <= onehot_state(Reg1State);
+        state <= onehot_state(Reg2State);
         mem_addr_port <= pc;
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule read_reg_1 (is_onehot_state(state, Reg1State));
+    rule read_reg_2 (is_onehot_state(state, Reg2State));
         inst <= mem_result_port;
         // Note that in this state, we address the register file directly from
         // the data bus return path -- because we don't have the instruction
         // latched yet! This is the only place where we do this.
-        regfile.read(mem_result_port[19:15]);
-        state <= onehot_state(Reg2State);
+        regfile.read(mem_result_port[24:20]);
+        state <= onehot_state(Reg1State);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule read_reg_2 (is_onehot_state(state, Reg2State));
-        x1 <= regfile.read_result;
-        regfile.read(inst_rs2);
+    rule read_reg_1 (is_onehot_state(state, Reg1State));
+        let imm_i = signExtend(inst[31:20]);
+
+        x2 <= regfile.read_result;
+        regfile.read(inst_rs1);
         state <= onehot_state(ExecuteState);
+
+        comp_rhs <= case (inst_opcode) matches
+            'b1100011: return regfile.read_result; // Bxx
+            'b0110011: return regfile.read_result; // ALU reg
+            'b0010011: return imm_i; // ALU imm
+            default: return ?;
+        endcase;
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -226,14 +237,8 @@ provisos (
         Word imm_b = {
             signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
-        // Try and generate no more than _two_ comparators (we got four by
-        // default).
-        let comp_rhs = case (inst_opcode) matches
-            'b1100011: return regfile.read_result; // Bxx
-            'b0110011: return regfile.read_result; // ALU reg
-            'b0010011: return imm_i; // ALU imm
-            default: return ?;
-        endcase;
+        let x1 = regfile.read_result;
+
         let signed_less_than = toSigned(x1) < toSigned(comp_rhs);
         let unsigned_less_than = x1 < comp_rhs;
 
@@ -266,8 +271,8 @@ provisos (
             // Bxx
             'b1100011: begin
                 let condition = case (inst_funct3) matches
-                    'b000: return x1 == regfile.read_result;
-                    'b001: return x1 != regfile.read_result;
+                    'b000: return x1 == comp_rhs;
+                    'b001: return x1 != comp_rhs;
                     'b100: return signed_less_than;
                     'b101: return !signed_less_than;
                     'b110: return unsigned_less_than;
@@ -296,7 +301,7 @@ provisos (
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
                         mem_addr_port <= truncate(word_ea);
-                        mem_data_port <= regfile.read_result;
+                        mem_data_port <= x2;
                         mem_write_port.send;
                         state <= onehot_state(FetchState);
                     end
@@ -329,21 +334,21 @@ provisos (
                 let alu_result = case (inst_funct3) matches
                     'b000: begin
                         let sub = inst_funct7[5];
-                        return x1 + (regfile.read_result ^ signExtend(sub)) + zeroExtend(sub);
+                        return x1 + (x2 ^ signExtend(sub)) + zeroExtend(sub);
                     end
-                    'b001: return x1 << regfile.read_result[4:0]; // SLL
+                    'b001: return x1 << x2[4:0]; // SLL
                     // SLT
                     'b010: return signed_less_than ? 1 : 0;
                     // SLTU
                     'b011: return unsigned_less_than ? 1 : 0;
-                    'b100: return x1 ^ regfile.read_result; // XOR
+                    'b100: return x1 ^ x2; // XOR
                     'b101: if (inst_funct7[5] == 0) begin // SRL
-                        return x1 >> regfile.read_result[4:0];
+                        return x1 >> x2[4:0];
                     end else begin // SRA
-                        return pack(toSigned(x1) >> regfile.read_result[4:0]);
+                        return pack(toSigned(x1) >> x2[4:0]);
                     end
-                    'b110: return x1 | regfile.read_result;
-                    'b111: return x1 & regfile.read_result;
+                    'b110: return x1 | x2;
+                    'b111: return x1 & x2;
                 endcase;
                 regfile.write(inst_rd, alu_result);
                 state <= onehot_state(FetchState);

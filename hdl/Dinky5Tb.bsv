@@ -29,10 +29,10 @@ module mkTb ();
         endpar
         par
             uut.mem_result(insn_LUI_x2_DEADB000);
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
         endpar
         par
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
         endpar
         dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
         par
@@ -42,10 +42,10 @@ module mkTb ();
         endpar
         par
             uut.mem_result(insn_AUIPC_x2_DEADB000);
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
         endpar
         par
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
         endpar
         dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
         par
@@ -55,10 +55,10 @@ module mkTb ();
         endpar
         par
             uut.mem_result(insn_JAL_x2_8);
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
         endpar
         par
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
         endpar
         dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
         par
@@ -68,10 +68,10 @@ module mkTb ();
         endpar
         par
             uut.mem_result(insn_JALR_x2_x2_16);
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
         endpar
         par
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
         endpar
         dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
         par
@@ -82,10 +82,10 @@ module mkTb ();
         endpar
         par
             uut.mem_result(insn_BEQ_x2_x2_16);
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
         endpar
         par
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
         endpar
         dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
         par
@@ -96,10 +96,10 @@ module mkTb ();
 
         par
             uut.mem_result(insn_LW_x3_x2_404);
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
         endpar
         par
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
+            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
         endpar
         par
             dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
