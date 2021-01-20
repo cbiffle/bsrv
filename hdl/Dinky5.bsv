@@ -312,19 +312,19 @@ provisos (
             'b0010011: begin
                 let alu_result = case (inst_funct3) matches
                     'b000: return x1 + imm_i; // ADDI
-                    'b001: return x1 << imm_i[4:0]; // SLLI
+                    'b001: return x1 << comp_rhs[4:0]; // SLLI
                     // SLTI
                     'b010: return signed_less_than ? 1 : 0;
                     // SLTIU
                     'b011: return unsigned_less_than ? 1 : 0;
-                    'b100: return x1 ^ imm_i; // XORI
+                    'b100: return x1 ^ comp_rhs; // XORI
                     'b101: if (inst_funct7[5] == 0) begin // SRLI
-                        return x1 >> imm_i[4:0];
+                        return x1 >> comp_rhs[4:0];
                     end else begin // SRAI
-                        return pack(toSigned(x1) >> imm_i[4:0]);
+                        return pack(toSigned(x1) >> comp_rhs[4:0]);
                     end
-                    'b110: return x1 | imm_i;
-                    'b111: return x1 & imm_i;
+                    'b110: return x1 | comp_rhs;
+                    'b111: return x1 & comp_rhs;
                 endcase;
                 regfile.write(inst_rd, alu_result);
                 state <= onehot_state(FetchState);
@@ -336,19 +336,19 @@ provisos (
                         let sub = inst_funct7[5];
                         return x1 + (x2 ^ signExtend(sub)) + zeroExtend(sub);
                     end
-                    'b001: return x1 << x2[4:0]; // SLL
+                    'b001: return x1 << comp_rhs[4:0]; // SLL
                     // SLT
                     'b010: return signed_less_than ? 1 : 0;
                     // SLTU
                     'b011: return unsigned_less_than ? 1 : 0;
-                    'b100: return x1 ^ x2; // XOR
+                    'b100: return x1 ^ comp_rhs; // XOR
                     'b101: if (inst_funct7[5] == 0) begin // SRL
-                        return x1 >> x2[4:0];
+                        return x1 >> comp_rhs[4:0];
                     end else begin // SRA
-                        return pack(toSigned(x1) >> x2[4:0]);
+                        return pack(toSigned(x1) >> comp_rhs[4:0]);
                     end
-                    'b110: return x1 | x2;
-                    'b111: return x1 & x2;
+                    'b110: return x1 | comp_rhs;
+                    'b111: return x1 & comp_rhs;
                 endcase;
                 regfile.write(inst_rd, alu_result);
                 state <= onehot_state(FetchState);
