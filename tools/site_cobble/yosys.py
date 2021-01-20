@@ -114,7 +114,9 @@ ninja_rules = {
         'rspfile_content': '$yosys_cmds',
     },
     'yosys_design': {
-        'command': '$yosys $yosys_flags -q -L $out.log -s $out.ys -b $yosys_backend -o $out',
+        'command': '$yosys $yosys_flags -q -L $out.log -s $out.ys -b $yosys_backend -E $out.d -o $out',
+        'depfile': '$out.d',
+        'deps': 'gcc',
         'description': 'YOSYS $out.ys',
     }
 }
