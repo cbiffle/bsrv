@@ -1,0 +1,19 @@
+# RISC-V tinkering with Bluespec
+
+I like RISC-V! I also like HDLs that are more productive than Verilog!
+
+The "official" RISC-V implementations in Bluespec are ... very elaborate and
+difficult to understand. So, in a quest for better understanding, I've written
+my own.
+
+This is currently intended as an experiment and educational resource, and I make
+no arguments about this being the bestest RISC-V ever (or even that it is
+correct).
+
+# License / copyright
+
+Except where noted the contents of this repository are Copyright (C) 2021 Cliff
+L. Biffle, and are licensed under the terms of the Mozilla Public License 2.0
+(see the LICENSE file).
+
+Anything else is marked in the file header.
