@@ -257,13 +257,13 @@ provisos (
             end
             // JAL
             'b1101111: begin
-                regfile.write(inst_rd, extend(pc00));
+                regfile.write(inst_rd, extend({pc_1, 2'b00}));
                 next_pc = truncateLSB(pc00 + truncate(imm_j));
                 state <= onehot_state(FetchState);
             end
             // JALR
             'b1100111: begin
-                regfile.write(inst_rd, extend(pc00));
+                regfile.write(inst_rd, extend({pc_1, 2'b00}));
                 Word full_ea = x1 + imm_i;
                 Bit#(xlen_m2) word_ea = truncateLSB(full_ea);
                 next_pc = truncate(word_ea);

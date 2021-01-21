@@ -77,8 +77,8 @@ module mkTb ();
         par
             dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
             $display(fshow(uut.mem_addr));
-            //dynamicAssert(uut.mem_addr == 6,
-            //    "core should follow jump");
+            dynamicAssert(uut.mem_addr == 7,
+                "core should follow jump");
         endpar
         par
             uut.mem_result(insn_BEQ_x2_x2_16);
@@ -90,7 +90,7 @@ module mkTb ();
         dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
         par
             dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 10,
+            dynamicAssert(uut.mem_addr == 11,
                 "core should follow jump");
         endpar
 
@@ -103,7 +103,7 @@ module mkTb ();
         endpar
         par
             dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
-            dynamicAssert(uut.mem_addr == (16 + 'h404) >> 2, "load EA");
+            dynamicAssert(uut.mem_addr == (20 + 'h404) >> 2, "load EA");
         endpar
         par
             dynamicAssert(uut.core_state == onehot_state(LoadState), "load state");
@@ -111,7 +111,7 @@ module mkTb ();
         endpar
         par
             dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 11, "sequential ex");
+            dynamicAssert(uut.mem_addr == 12, "sequential ex");
         endpar
         test_complete <= True;
         $display("PASS");
