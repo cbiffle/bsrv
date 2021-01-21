@@ -251,7 +251,7 @@ provisos (
             end
             // AUIPC
             'b0010111: begin
-                regfile.write(inst_rd, extend(pc00) + imm_u);
+                regfile.write(inst_rd, extend(pc00 + truncate(imm_u)));
                 state <= onehot_state(FetchState);
             end
             // JAL
