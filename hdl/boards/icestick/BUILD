@@ -10,10 +10,12 @@ bluespec_verilog('examples',
     top = 'Examples.bsv',
     modules = [
         'mkDinky',
+        'mkTangy',
     ],
     deps = [
         ':Board',
         '//hdl/examples:Dinky5Soc',
+        '//hdl/examples:Tangy5Soc',
     ],
 )
 
@@ -36,3 +38,24 @@ nextpnr_ice40_bitstream('dinky_icestick',
         ':dinky',
     ],
 )
+
+yosys_design('tangy',
+    top_module = 'mkTangy',
+    sources = [
+        ':examples#mkTangy',
+        '../../BRAM2.v',
+        '../../BRAM1.v',
+    ],
+    deps = [
+        ':examples',
+    ],
+)
+
+nextpnr_ice40_bitstream('tangy_icestick',
+    env = 'icestick',
+    design = ':tangy#json',
+    deps = [
+        ':tangy',
+    ],
+)
+

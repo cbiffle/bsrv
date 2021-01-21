@@ -13,3 +13,11 @@ bluespec_library('Dinky5Soc',
         '//hdl:Dinky5',
     ],
 )
+bluespec_library('Tangy5Soc',
+    sources = [
+        'Tangy5Soc.bsv',
+    ],
+    deps = [
+        '//hdl:Tangy5',
+    ],
+)
