@@ -16,9 +16,9 @@ endinterface
 
 (* synthesize *)
 module mkDinky5Soc (Dinky5Soc);
-    Dinky5#(7) core <- mkDinky5;
+    Dinky5#(8) core <- mkDinky5;
 
-    BRAM_PORT#(Bit#(7), Word) ram <- mkBRAMCore1(128, False);
+    BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1(256, False);
 
     rule memory_drive;
         ram.put(core.mem_write, core.mem_addr, core.mem_data);
