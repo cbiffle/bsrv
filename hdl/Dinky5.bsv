@@ -255,6 +255,17 @@ provisos (
             (x1[31] ^ comp_rhs[31]) != 0 ? x1[31] : difference[32]);
         let unsigned_less_than = unpack(difference[32]);
 
+        // Force structural sharing for the shifters. Shifters are expensive,
+        // we only want one generated.
+        let shifter_lhs = case (inst_funct3) matches
+            'b001: return reverseBits(x1);
+            'b100: return x1;
+            default: return ?;
+        endcase;
+        bit shift_fill = msb(shifter_lhs) & inst_funct7[5];
+        Int#(33) shift_ext = unpack({shift_fill, shifter_lhs});
+        let shifter_out = truncate(pack(shift_ext >> comp_rhs[4:0]));
+
         // Behold, the Big Fricking RV32I Case Discriminator!
         let halting = False;
         let loading = False;
@@ -329,17 +340,13 @@ provisos (
                         if (sub != 0) return truncate(difference);
                         else return x1 + comp_rhs;
                     end
-                    'b001: return x1 << comp_rhs[4:0]; // SLLI / SLL
+                    'b001: return reverseBits(shifter_out); // SLLI / SLL
                     // SLTI / SLT
                     'b010: return signed_less_than ? 1 : 0;
                     // SLTIU / SLTU
                     'b011: return unsigned_less_than ? 1 : 0;
                     'b100: return x1 ^ comp_rhs; // XORI / XOR
-                    'b101: if (inst_funct7[5] == 0) begin // SRLI / SRL
-                        return x1 >> comp_rhs[4:0];
-                    end else begin // SRAI / SRA
-                        return pack(toSigned(x1) >> comp_rhs[4:0]);
-                    end
+                    'b101: return shifter_out; // SRLI / SRL / SRAI / SRA
                     'b110: return x1 | comp_rhs; // ORI / OR
                     'b111: return x1 & comp_rhs; // ANDI / AND
                 endcase;
