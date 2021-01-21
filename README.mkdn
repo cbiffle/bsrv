@@ -10,6 +10,15 @@ This is currently intended as an experiment and educational resource, and I make
 no arguments about this being the bestest RISC-V ever (or even that it is
 correct).
 
+# Sizes and stats
+
+This is mostly for my reference, when I return to this project later wondering
+about the results. Numbers may be out of date.
+
+| Core | System | Target | # LCs | fmax (MHz) | MIPS |
+| :--- | :----- | :----- | ----: | ---------: | ---: |
+| Dinky5 | Dinky5Soc | hx1k | 941 | 58.58 | ~19 |
+
 # License / copyright
 
 Except where noted the contents of this repository are Copyright (C) 2021 Cliff

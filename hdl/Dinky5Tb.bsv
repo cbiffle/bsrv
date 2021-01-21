@@ -12,6 +12,11 @@ module mkTb ();
 
     Reg#(int) cycle <- mkReg(0);
     Reg#(Bool) test_complete <- mkReg(False);
+    Reg#(Bit#(14)) delayed_addr <- mkRegU;
+
+    rule delay_addr;
+        delayed_addr <= uut.mem_addr;
+    endrule
 
     //let insn_ADD_x1_x0_x2 = 'b0000000_00000_00001_000_00010_0110011;
     let insn_LUI_x2_DEADB000 = 'b1101_1110_1010_1101_1011_00010_0110111;
@@ -28,12 +33,7 @@ module mkTb ();
     );
         return seq
             par
-                dynamicAssert(uut.core_state == onehot_state(FetchState),
-                    "fetch state");
-                dynamicAssert(uut.mem_addr == pc,
-                    "fetch PC");
-            endpar
-            par
+                dynamicAssert(delayed_addr == pc, "fetch PC");
                 uut.mem_result(insn);
                 dynamicAssert(uut.core_state == onehot_state(Reg2State),
                     "reg2 state");

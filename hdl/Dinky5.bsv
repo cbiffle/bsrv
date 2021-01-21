@@ -2,7 +2,8 @@
 // for synthesis on the iCE40 FPGA family.
 //
 // - Designed to be compact while also being short and clear.
-// - Not pipelined, takes 4 or 5 cycles per instruction.
+// - Not pipelined, though fetch and execute are overlapped; most instructions
+//   take 3 cycles, loads and stores take 4.
 // - Supports most of RV32I. Currently missing: byte and halfword memory
 //   accesses, FENCE, SYSTEM.
 // - Halts on unsupported opcodes to simplify debugging.
@@ -110,8 +111,7 @@ endinterface
 // Execution states of the CPU. These enumerate bit positions in the actual
 // one-hot state used by the circuit.
 typedef enum {
-    ResetState,     // Newly reset.
-    FetchState,     // Addressing RAM to fetch instruction.
+    JustFetchState, // Reset, or second cycle of store.
     Reg2State,      // Reading instruction, selecting rs2.
     Reg1State,      // Latching x2, selecting rs1.
     ExecuteState,   // Executing first instruction cycle.
@@ -121,7 +121,7 @@ typedef enum {
 
 // One-hot representation of State; must have one bit for each enum
 // discriminant.
-typedef Bit#(7) OneHotState;
+typedef Bit#(6) OneHotState;
 
 // Converts from weighted to one-hot representation.
 function OneHotState onehot_state(State s);
@@ -144,7 +144,7 @@ provisos (
     // State elements.
 
     // State of execution state machine.
-    Reg#(OneHotState) state <- mkReg(onehot_state(ResetState));
+    Reg#(OneHotState) state <- mkReg(onehot_state(JustFetchState));
     // Address of current instruction. Note that this is a word address, not a
     // byte address, so it is missing its two LSBs.
     Reg#(Bit#(addr_width)) pc <- mkReg(0);
@@ -195,19 +195,23 @@ provisos (
     ///////////////////////////////////////////////////////////////////////////
     // Core execution rules.
 
+    // Reusable snippet for any state that wants to start an overlapping
+    // instruction fetch (which is most of them).
+    function Action fetch_next_instruction(Bit#(addr_width) next_pc);
+        return action
+            mem_addr_port <= next_pc;
+            pc <= next_pc;
+            state <= onehot_state(Reg2State);
+        endaction;
+    endfunction
+
+
     // Explain our use of one-hot state encoding to the compiler.
-    (* mutually_exclusive = "leave_reset, fetch, read_reg_1, read_reg_2, execute, finish_load" *)
+    (* mutually_exclusive = "just_fetch, read_reg_1, read_reg_2, execute, finish_load" *)
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule leave_reset (is_onehot_state(state, ResetState));
-        state <= onehot_state(FetchState);
-    endrule
-
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule fetch (is_onehot_state(state, FetchState));
-        state <= onehot_state(Reg2State);
-        mem_addr_port <= pc;
-        pc_1 <= pc + 1;
+    rule just_fetch (is_onehot_state(state, JustFetchState));
+        fetch_next_instruction(pc);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -218,6 +222,7 @@ provisos (
         // latched yet! This is the only place where we do this.
         regfile.read(mem_result_port[24:20]);
         state <= onehot_state(Reg1State);
+        pc_1 <= pc + 1;
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -244,22 +249,22 @@ provisos (
         let unsigned_less_than = x1 < comp_rhs;
 
         // Behold, the Big Fricking RV32I Case Discriminator!
+        let halting = False;
+        let loading = False;
+        let storing = False;
         case (inst_opcode) matches
             // LUI
             'b0110111: begin
                 regfile.write(inst_rd, imm_u);
-                state <= onehot_state(FetchState);
             end
             // AUIPC
             'b0010111: begin
                 regfile.write(inst_rd, extend(pc00 + truncate(imm_u)));
-                state <= onehot_state(FetchState);
             end
             // JAL
             'b1101111: begin
                 regfile.write(inst_rd, extend({pc_1, 2'b00}));
                 next_pc = truncateLSB(pc00 + truncate(imm_j));
-                state <= onehot_state(FetchState);
             end
             // JALR
             'b1100111: begin
@@ -267,7 +272,6 @@ provisos (
                 Word full_ea = x1 + imm_i;
                 Bit#(xlen_m2) word_ea = truncateLSB(full_ea);
                 next_pc = truncate(word_ea);
-                state <= onehot_state(FetchState);
             end
             // Bxx
             'b1100011: begin
@@ -281,7 +285,6 @@ provisos (
                     default: return ?;
                 endcase;
                 if (condition) next_pc = truncateLSB(pc00 + truncate(imm_b));
-                state <= onehot_state(FetchState);
             end
             // Lx
             'b0000011: begin
@@ -290,9 +293,9 @@ provisos (
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
                         mem_addr_port <= truncate(word_ea);
-                        state <= onehot_state(LoadState);
+                        loading = True;
                     end
-                    default: state <= onehot_state(HaltState);
+                    default: halting = True;
                 endcase
             end
             // Sx
@@ -304,9 +307,9 @@ provisos (
                         mem_addr_port <= truncate(word_ea);
                         mem_data_port <= x2;
                         mem_write_port.send;
-                        state <= onehot_state(FetchState);
+                        storing = True;
                     end
-                    default: state <= onehot_state(HaltState);
+                    default: halting = True;
                 endcase
             end
             // ALU reg/immediate
@@ -334,20 +337,26 @@ provisos (
                     'b111: return x1 & comp_rhs; // ANDI / AND
                 endcase;
                 regfile.write(inst_rd, alu_result);
-                state <= onehot_state(FetchState);
             end
             default: begin
-                state <= onehot_state(HaltState);
+                halting = True;
             end
         endcase
 
-        pc <= next_pc;
+        if (halting) state <= onehot_state(HaltState);
+        else if (loading) begin
+            pc <= next_pc;
+            state <= onehot_state(LoadState);
+        end else if (storing) begin
+            pc <= next_pc;
+            state <= onehot_state(JustFetchState);
+        end else fetch_next_instruction(next_pc);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule finish_load (is_onehot_state(state, LoadState));
         regfile.write(inst_rd, mem_result_port);
-        state <= onehot_state(FetchState);
+        fetch_next_instruction(pc);
     endrule
 
     ///////////////////////////////////////////////////////////////////////////
