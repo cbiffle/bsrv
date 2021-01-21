@@ -9,30 +9,30 @@ bluespec_library('Board',
 bluespec_verilog('examples',
     top = 'Examples.bsv',
     modules = [
-        'mkBlinky',
+        'mkDinky',
     ],
     deps = [
         ':Board',
-        '//hdl/examples:Blinky',
+        '//hdl/examples:Dinky5Soc',
     ],
 )
 
-# Blinky design targets
-
-yosys_design('blinky',
-    top_module = 'mkBlinky',
+yosys_design('dinky',
+    top_module = 'mkDinky',
     sources = [
-        ':examples#mkBlinky',
+        ':examples#mkDinky',
+        '../../BRAM2.v',
+        '../../BRAM1.v',
     ],
     deps = [
         ':examples',
     ],
 )
 
-nextpnr_ice40_bitstream('blinky_icestick',
+nextpnr_ice40_bitstream('dinky_icestick',
     env = 'icestick',
-    design = ':blinky#json',
+    design = ':dinky#json',
     deps = [
-        ':blinky',
+        ':dinky',
     ],
 )
