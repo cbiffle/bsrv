@@ -1,7 +1,10 @@
 // Dinky5 is a very simple RISC-V RV32I implementation in Bluespec, designed
 // for synthesis on the iCE40 FPGA family.
 //
-// - Designed to be compact while also being short and clear.
+// The intent of this core is to produce the smallest useful RV32I core on an
+// iCE40 hx1k (i.e. leaving as many resources as possible available for other
+// purposes) without sacrificing code clarity.
+//
 // - Not pipelined, though fetch and execute are overlapped; most instructions
 //   take 3 cycles, loads and stores take 4.
 // - Supports most of RV32I. Currently missing: byte and halfword memory
@@ -245,8 +248,12 @@ provisos (
 
         let x1 = regfile.read_result;
 
-        let signed_less_than = toSigned(x1) < toSigned(comp_rhs);
-        let unsigned_less_than = x1 < comp_rhs;
+        // Force structural sharing between the subtraction circuit and the
+        // comparators.
+        let difference = zeroExtend(x1) + {1'b1, ~comp_rhs} + 1;
+        let signed_less_than = unpack(
+            (x1[31] ^ comp_rhs[31]) != 0 ? x1[31] : difference[32]);
+        let unsigned_less_than = unpack(difference[32]);
 
         // Behold, the Big Fricking RV32I Case Discriminator!
         let halting = False;
@@ -319,8 +326,8 @@ provisos (
                 let alu_result = case (inst_funct3) matches
                     'b000: begin // ADDI / ADD / SUB
                         let sub = is_reg & inst_funct7[5];
-                        return x1 + (comp_rhs ^ signExtend(sub))
-                                  + zeroExtend(sub);
+                        if (sub != 0) return truncate(difference);
+                        else return x1 + comp_rhs;
                     end
                     'b001: return x1 << comp_rhs[4:0]; // SLLI / SLL
                     // SLTI / SLT
