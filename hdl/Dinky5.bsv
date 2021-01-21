@@ -1,13 +1,13 @@
 // Dinky5 is a very simple RISC-V RV32I implementation in Bluespec, designed
 // for synthesis on the iCE40 FPGA family.
 //
-// Dinky5 is old-school and uses between four and five cycles to execute
-// instructions.
-//
-// While Dinky5 is simple, it has some features missing from other simple
-// cores, including detection of illegal/unimplemented instructions. (You can't
-// do anything useful about such instructions, but they are detected and halt
-// the CPU, which makes debugging the CPU easier.)
+// - Designed to be compact while also being short and clear.
+// - Not pipelined, takes 4 or 5 cycles per instruction.
+// - Supports most of RV32I. Currently missing: byte and halfword memory
+//   accesses, FENCE, SYSTEM.
+// - Halts on unsupported opcodes to simplify debugging.
+// - Parameterized address bus / PC width to save space in small SoCs.
+// - Minimal bus interface does not support faults or wait states.
 
 package Dinky5;
 
@@ -182,6 +182,14 @@ provisos (
     let inst_rs1 = inst[19:15];
     let inst_funct7 = inst[31:25];
 
+    // Various immediate decodes
+    Word imm_i = signExtend(inst[31:20]);
+    Word imm_u = {inst[31:12], 0};
+    Word imm_j = {
+        signExtend(inst[31]), inst[19:12], inst[20], inst[30:21], 1'b0};
+    Word imm_b = {
+        signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
+
     ///////////////////////////////////////////////////////////////////////////
     // Core execution rules.
 
@@ -211,8 +219,6 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule read_reg_1 (is_onehot_state(state, Reg1State));
-        let imm_i = signExtend(inst[31:20]);
-
         x2 <= regfile.read_result;
         regfile.read(inst_rs1);
         state <= onehot_state(ExecuteState);
@@ -228,14 +234,6 @@ provisos (
     (* fire_when_enabled, no_implicit_conditions *)
     rule execute (is_onehot_state(state, ExecuteState));
         let next_pc = pc + 1; // we will MUTATE this for jumps!
-
-        // Various immediate decodes
-        Word imm_i = signExtend(inst[31:20]);
-        Word imm_u = {inst[31:12], 0};
-        Word imm_j = {
-            signExtend(inst[31]), inst[19:12], inst[20], inst[30:21], 1'b0};
-        Word imm_b = {
-            signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
         let x1 = regfile.read_result;
 
