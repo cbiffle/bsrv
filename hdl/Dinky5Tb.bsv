@@ -21,98 +21,68 @@ module mkTb ();
     let insn_BEQ_x2_x2_16 = 'b0_000000_00010_00010_000_1000_0_1100011;
     let insn_LW_x3_x2_404 = 'b0100_0000_0100_00010_010_00011_0000011;
 
-    mkAutoFSM(seq
-        par
-            dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 0,
-                "core should initially fetch addr 0");
-        endpar
-        par
-            uut.mem_result(insn_LUI_x2_DEADB000);
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
-        endpar
-        dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
-        par
-            dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 1,
-                "core should fetch next instruction");
-        endpar
-        par
-            uut.mem_result(insn_AUIPC_x2_DEADB000);
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
-        endpar
-        dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
-        par
-            dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 2,
-                "core should fetch next instruction");
-        endpar
-        par
-            uut.mem_result(insn_JAL_x2_8);
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
-        endpar
-        dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
-        par
-            dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 4,
-                "core should follow jump");
-        endpar
-        par
-            uut.mem_result(insn_JALR_x2_x2_16);
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
-        endpar
-        dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
-        par
-            dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            $display(fshow(uut.mem_addr));
-            dynamicAssert(uut.mem_addr == 7,
-                "core should follow jump");
-        endpar
-        par
-            uut.mem_result(insn_BEQ_x2_x2_16);
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
-        endpar
-        dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
-        par
-            dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 11,
-                "core should follow jump");
-        endpar
+    function Stmt insn_cycle_exec_check(
+        Bit#(14) pc,
+        Word insn,
+        Stmt check
+    );
+        return seq
+            par
+                dynamicAssert(uut.core_state == onehot_state(FetchState),
+                    "fetch state");
+                dynamicAssert(uut.mem_addr == pc,
+                    "fetch PC");
+            endpar
+            par
+                uut.mem_result(insn);
+                dynamicAssert(uut.core_state == onehot_state(Reg2State),
+                    "reg2 state");
+            endpar
+            par
+                dynamicAssert(uut.core_state == onehot_state(Reg1State),
+                    "reg1 state");
+            endpar
+            par
+                dynamicAssert(uut.core_state == onehot_state(ExecuteState),
+                    "execute state");
+                check;
+            endpar
+        endseq;
+    endfunction
 
-        par
-            uut.mem_result(insn_LW_x3_x2_404);
-            dynamicAssert(uut.core_state == onehot_state(Reg2State), "reg2 state");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(Reg1State), "reg1 state");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(ExecuteState), "execute state");
-            dynamicAssert(uut.mem_addr == (20 + 'h404) >> 2, "load EA");
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(LoadState), "load state");
-            uut.mem_result('hBEEF_D00D);
-        endpar
-        par
-            dynamicAssert(uut.core_state == onehot_state(FetchState), "fetch state");
-            dynamicAssert(uut.mem_addr == 12, "sequential ex");
-        endpar
+    function Stmt insn_cycle(
+        Bit#(14) pc,
+        Word insn
+    );
+        return insn_cycle_exec_check(pc, insn, (seq noAction; endseq));
+    endfunction
+
+    function Stmt insn_cycle_load(
+        Bit#(14) pc,
+        Word insn,
+        Bit#(14) ea,
+        Word loaded
+    );
+        return seq
+            insn_cycle_exec_check(pc, insn, seq
+                dynamicAssert(uut.mem_addr == ea, "load EA");
+            endseq);
+            par
+                dynamicAssert(uut.core_state == onehot_state(LoadState),
+                    "load state");
+                uut.mem_result(loaded);
+            endpar
+        endseq;
+    endfunction
+
+    mkAutoFSM(seq
+        insn_cycle(0, insn_LUI_x2_DEADB000);
+        insn_cycle(1, insn_AUIPC_x2_DEADB000);
+        insn_cycle(2, insn_JAL_x2_8);
+        insn_cycle(4, insn_JALR_x2_x2_16);
+        insn_cycle(7, insn_BEQ_x2_x2_16);
+        insn_cycle_load(11, insn_LW_x3_x2_404, (20 + 'h404) >> 2, 'hBAADF00D);
+
         test_complete <= True;
         $display("PASS");
     endseq);
