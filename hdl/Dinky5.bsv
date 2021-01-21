@@ -155,6 +155,8 @@ provisos (
     Reg#(Word) x2 <- mkRegU;
     // Latch on input to the magnitude comparator.
     Reg#(Word) comp_rhs <- mkRegU;
+    // Our early guess at the next PC value.
+    Reg#(Bit#(addr_width)) pc_1 <- mkRegU;
 
     // General purpose registers.
     RegFile regfile <- mkRegFile;
@@ -205,6 +207,7 @@ provisos (
     rule fetch (is_onehot_state(state, FetchState));
         state <= onehot_state(Reg2State);
         mem_addr_port <= pc;
+        pc_1 <= pc + 1;
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -233,7 +236,7 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule execute (is_onehot_state(state, ExecuteState));
-        let next_pc = pc + 1; // we will MUTATE this for jumps!
+        let next_pc = pc_1; // we will MUTATE this for jumps!
 
         let x1 = regfile.read_result;
 
