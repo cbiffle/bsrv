@@ -24,7 +24,7 @@ yosys_design('dinky',
     sources = [
         ':examples#mkDinky',
         '../../BRAM2.v',
-        '../../BRAM1.v',
+        '../../BRAM1Load.v',
     ],
     deps = [
         ':examples',
