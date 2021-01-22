@@ -2,6 +2,8 @@
 
 package Common;
 
+import BRAMCore::*;
+
 // Number of bits in an x register (general purpose register).
 typedef 32 XLEN;
 // Type held in general purpose registers.
@@ -10,6 +12,20 @@ typedef Bit#(XLEN) Word;
 typedef 32 RegCount;
 // Type used to address general purpose registers.
 typedef Bit#(TLog#(RegCount)) RegId;
+
+// Fields of a 32-bit instruction. Not every instruction uses _all_ these
+// fields, and the fields are often concatenated to form immediates, etc.
+//
+// The ordering of these fields is chosen so that an instruction word can be
+// decoded by using 'unpack'.
+typedef struct {
+    Bit#(7) funct7;
+    RegId rs2;
+    RegId rs1;
+    Bit#(3) funct3;
+    RegId rd;
+    Bit#(7) opcode;
+} InstFields deriving (Bits, FShow);
 
 // Rough equivalent of Verilog 'signed' function. Useful for forcing sign
 // extension in shifts.
@@ -70,5 +86,46 @@ interface DinkyBusInit#(numeric type addr_width);
     (* always_ready, always_enabled *)
     method Action mem_result(Word value);
 endinterface
+
+///////////////////////////////////////////////////////////////////////////////
+// Pseudo-dual-port register file compatible with iCE40 BRAM.
+//
+// iCE40 BRAM has one dedicated read port and one dedicated write port, while
+// Bluespec expects two read/write ports. By only using read on one port and
+// write on the other, we can get an equivalent result.
+//
+// Note that synthesizing this with Yosys requires replacing Bluespec's
+// supplied BRAM Verilog with our simplified copy.
+
+interface RegFile1;
+    // Starts a read of GPR 'index'. The contents will be available after the
+    // next clock edge on 'read_result'.
+    (* always_ready *)
+    method Action read(RegId index);
+
+    // Last value read from a GPR.
+    (* always_ready *)
+    method Word read_result;
+
+    // Sets register 'index' to 'value'.
+    (* always_ready *)
+    method Action write(RegId index, Word value);
+endinterface
+
+// BRAM-based register file implementation.
+(* synthesize *)
+module mkRegFile1 (RegFile1);
+    BRAM_DUAL_PORT#(RegId, Word) regfile <- mkBRAMCore2(valueof(RegCount), False);
+
+    method Action read(RegId index);
+        regfile.a.put(False, index, ?);
+    endmethod
+
+    method Action write(RegId index, Word value);
+        if (index != 0) regfile.b.put(True, index, value);
+    endmethod
+
+    method Word read_result = regfile.a.read;
+endmodule
 
 endpackage

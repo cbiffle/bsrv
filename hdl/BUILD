@@ -2,42 +2,28 @@
 
 bluespec_library('Common', sources = ['Common.bsv'])
 
-bluespec_library('Dinky5',
-    sources = ['Dinky5.bsv'],
-    deps = [':Common'],
-)
+# Repeating pattern of targets for each basic core design:
+def basic_core(name):
+    bluespec_library(name,
+        sources = [name + '.bsv'],
+        deps = [':Common'],
+    )
 
-bluespec_sim('Dinky5Tb',
-    top = 'Dinky5Tb.bsv',
-    modules = ['mkTb'],
-    deps = [
-        ':Common',
-        ':Dinky5',
-    ],
-)
+    bluespec_sim(name + 'Tb',
+        top = name + 'Tb.bsv',
+        modules = ['mkTb'],
+        deps = [
+            ':Common',
+            ':' + name,
+        ],
+    )
 
-bluesim_binary('Dinky5Tb-bin',
-    env = 'bluesim_default',
-    top = ':Dinky5Tb#mkTb',
-    deps = [':Dinky5Tb'],
-)
+    bluesim_binary(name + 'Tb-bin',
+        env = 'bluesim_default',
+        top = ':' + name + 'Tb#mkTb',
+        deps = [':' + name + 'Tb'],
+    )
 
-bluespec_library('Tangy5',
-    sources = ['Tangy5.bsv'],
-    deps = [':Common'],
-)
-
-bluespec_sim('Tangy5Tb',
-    top = 'Tangy5Tb.bsv',
-    modules = ['mkTb'],
-    deps = [
-        ':Common',
-        ':Tangy5',
-    ],
-)
-
-bluesim_binary('Tangy5Tb-bin',
-    env = 'bluesim_default',
-    top = ':Tangy5Tb#mkTb',
-    deps = [':Tangy5Tb'],
-)
+basic_core('Corny5')
+basic_core('Dinky5')
+basic_core('Tangy5')
