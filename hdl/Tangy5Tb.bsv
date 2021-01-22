@@ -4,11 +4,12 @@ import Assert::*;
 import FShow::*;
 import StmtFSM::*;
 
+import Common::*;
 import Tangy5::*;
 
 (* synthesize *)
 module mkTb ();
-    Tangy5#(14) uut <- mkTangy5_14;
+    Tangy5#(14) uut <- mkTangy5;
 
     Reg#(int) cycle <- mkReg(0);
     Reg#(Bool) test_complete <- mkReg(False);
@@ -16,7 +17,7 @@ module mkTb ();
     Reg#(Bit#(14)) delayed_addr <- mkRegU;
 
     rule update_delayed_addr;
-        delayed_addr <= uut.mem_addr;
+        delayed_addr <= uut.bus.mem_addr;
     endrule
 
     //let insn_ADD_x1_x0_x2 = 'b0000000_00000_00001_000_00010_0110011;
@@ -35,7 +36,7 @@ module mkTb ();
         return seq
             par
                 dynamicAssert(delayed_addr == pc, "should have fetched PC");
-                uut.mem_result(insn);
+                uut.bus.mem_result(insn);
                 dynamicAssert(uut.core_state == onehot_state(RegState),
                     "reg state");
             endpar
@@ -62,12 +63,12 @@ module mkTb ();
     );
         return seq
             insn_cycle_exec_check(pc, insn, seq
-                dynamicAssert(uut.mem_addr == ea, "load EA");
+                dynamicAssert(uut.bus.mem_addr == ea, "load EA");
             endseq);
             par
                 dynamicAssert(uut.core_state == onehot_state(LoadState),
                     "load state");
-                uut.mem_result(loaded);
+                uut.bus.mem_result(loaded);
             endpar
         endseq;
     endfunction
@@ -94,7 +95,7 @@ module mkTb ();
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule show_memaddr (!test_complete);
-        $display("MA = %0h", uut.mem_addr);
+        $display("MA = %0h", uut.bus.mem_addr);
     endrule
 
 endmodule

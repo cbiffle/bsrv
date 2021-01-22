@@ -14,17 +14,7 @@ import BRAMCore::*;
 import FShow::*;
 import Vector::*;
 
-///////////////////////////////////////////////////////////////////////////////
-// RISC-V parameters.
-
-// Number of bits in an x register (general purpose register).
-typedef 32 XLEN;
-// Type held in general purpose registers.
-typedef Bit#(XLEN) Word;
-// Number of general purpose registers defined.
-typedef 32 RegCount;
-// Type used to address general purpose registers.
-typedef Bit#(TLog#(RegCount)) RegId;
+import Common::*;
 
 ///////////////////////////////////////////////////////////////////////////////
 // 2R1W register file designed around iCE40 pseudo-dual-port block RAM.
@@ -89,22 +79,7 @@ endmodule
 // This bus interface is aggressively simplified and has no way to report
 // faults.
 interface Tangy5#(numeric type addr_width);
-    // Memory address output to bus. On cycles where memory is not being
-    // actively accessed, this output is undefined.
-    (* always_ready *)
-    method Bit#(addr_width) mem_addr;
-
-    // When 'True', a write is being requested; when 'False', a read.
-    (* always_ready *)
-    method Bool mem_write;
-
-    // Memory data output to bus, for writes. Undefined during reads.
-    (* always_ready *)
-    method Word mem_data;
-    
-    // Memory data return from bus.
-    (* always_ready, always_enabled *)
-    method Action mem_result(Word value);
+    interface DinkyBusInit#(addr_width) bus;
 
     // Internal state of core, for debugging.
     (* always_ready *)
@@ -123,21 +98,11 @@ typedef enum {
     ExecuteState,   // Executing first instruction cycle.
     LoadState,      // Second cycle for loads.
     HaltState       // Something has gone wrong.
-} State deriving (Bits, FShow, Eq);
+} State deriving (Bounded, Bits, FShow, Eq);
 
-// One-hot representation of State; must have one bit for each enum
-// discriminant.
+instance OneHotIndex#(State, 5);
+endinstance
 typedef Bit#(5) OneHotState;
-
-// Converts from weighted to one-hot representation.
-function OneHotState onehot_state(State s);
-    return 1 << pack(s);
-endfunction
-
-// Checks a bit in the one-hot state.
-function Bool is_onehot_state(OneHotState oh, State s);
-    return oh[pack(s)] != 0;
-endfunction
 
 module mkTangy5 (Tangy5#(addr_width))
 provisos (
@@ -368,13 +333,15 @@ provisos (
     ///////////////////////////////////////////////////////////////////////////
     // External port connections.
 
-    method Bit#(addr_width) mem_addr = mem_addr_port;
-    method Bool mem_write = mem_write_port;
-    method Word mem_data = mem_data_port;
+    interface DinkyBusInit bus;
+        method Bit#(addr_width) mem_addr = mem_addr_port;
+        method Bool mem_write = mem_write_port;
+        method Word mem_data = mem_data_port;
 
-    method Action mem_result(Word value);
-        mem_result_port <= value;
-    endmethod
+        method Action mem_result(Word value);
+            mem_result_port <= value;
+        endmethod
+    endinterface
 
     method OneHotState core_state;
         return state;
@@ -385,23 +352,5 @@ provisos (
     endmethod
 
 endmodule
-
-///////////////////////////////////////////////////////////////////////////////
-// Utility stuff.
-
-// Convenient concrete synthesis target with a 16-bit byte address space
-// (14-bit external bus). This is useful for getting Verilog of just the CPU
-// while debuggint the CPU.
-(* synthesize *)
-module mkTangy5_14 (Tangy5#(14));
-    Tangy5#(14) core <- mkTangy5;
-    return core;
-endmodule
-
-// Rough equivalent of Verilog 'signed' function. Useful for forcing sign
-// extension in shifts.
-function Int#(XLEN) toSigned(Word x);
-    return unpack(x);
-endfunction
 
 endpackage

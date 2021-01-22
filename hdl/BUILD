@@ -1,11 +1,17 @@
 # vim:syntax=python:
 
-bluespec_library('Dinky5', sources = ['Dinky5.bsv'])
+bluespec_library('Common', sources = ['Common.bsv'])
+
+bluespec_library('Dinky5',
+    sources = ['Dinky5.bsv'],
+    deps = [':Common'],
+)
 
 bluespec_sim('Dinky5Tb',
     top = 'Dinky5Tb.bsv',
     modules = ['mkTb'],
     deps = [
+        ':Common',
         ':Dinky5',
     ],
 )
@@ -16,12 +22,16 @@ bluesim_binary('Dinky5Tb-bin',
     deps = [':Dinky5Tb'],
 )
 
-bluespec_library('Tangy5', sources = ['Tangy5.bsv'])
+bluespec_library('Tangy5',
+    sources = ['Tangy5.bsv'],
+    deps = [':Common'],
+)
 
 bluespec_sim('Tangy5Tb',
     top = 'Tangy5Tb.bsv',
     modules = ['mkTb'],
     deps = [
+        ':Common',
         ':Tangy5',
     ],
 )

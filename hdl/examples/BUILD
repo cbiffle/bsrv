@@ -10,6 +10,7 @@ bluespec_library('Dinky5Soc',
         'Dinky5Soc.bsv',
     ],
     deps = [
+        '//hdl:Common',
         '//hdl:Dinky5',
     ],
 )
@@ -18,6 +19,7 @@ bluespec_library('Tangy5Soc',
         'Tangy5Soc.bsv',
     ],
     deps = [
+        '//hdl:Common',
         '//hdl:Tangy5',
     ],
 )
