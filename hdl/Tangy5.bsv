@@ -67,8 +67,10 @@ module mkRegFile (RegFile);
     endmethod
 
     method Action write(RegId index, Word value);
-        rf0.b.put(True, index, value);
-        rf1.b.put(True, index, value);
+        if (index != 0) begin
+            rf0.b.put(True, index, value);
+            rf1.b.put(True, index, value);
+        end
     endmethod
 
     method Tuple2#(Word, Word) read_result = tuple2(rf0.a.read, rf1.a.read);

@@ -66,7 +66,7 @@ module mkRegFile (RegFile);
     endmethod
 
     method Action write(RegId index, Word value);
-        regfile.b.put(True, index, value);
+        if (index != 0) regfile.b.put(True, index, value);
     endmethod
 
     method Word read_result = regfile.a.read;
