@@ -36,12 +36,8 @@ module mkTb ();
             par
                 dynamicAssert(delayed_addr == pc, "fetch PC");
                 uut.bus.mem_result(insn);
-                dynamicAssert(uut.core_state == Reg2State,
-                    "reg2 state");
-            endpar
-            par
-                dynamicAssert(uut.core_state == Reg1State,
-                    "reg1 state");
+                dynamicAssert(uut.core_state == RegState,
+                    "reg state");
             endpar
             par
                 dynamicAssert(uut.core_state == ExecuteState,

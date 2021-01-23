@@ -4,14 +4,11 @@
 // Corny5 is intended to be a straight naive implementation of the RV32I spec
 // without a lot of elaboration and optimization. The main "clever" thing
 // happening here is overlapped fetch and execute, saving one clock per cycle
-// on everything but loads and stores. (Most instructions take 3 cycles; loads
-// and stores take 4.) Otherwise, it's intended to be readable next to the
+// on everything but loads and stores. (Most instructions take 2 cycles; loads
+// and stores take 3.) Otherwise, it's intended to be readable next to the
 // RV32I spec.
 
 package Corny5;
-
-import FShow::*;
-import Vector::*;
 
 import Common::*;
 
@@ -34,8 +31,7 @@ endinterface
 // Execution states of the CPU.
 typedef enum {
     JustFetchState, // Reset, or second cycle of store.
-    Reg2State,      // Reading instruction, selecting rs2.
-    Reg1State,      // Latching x2, selecting rs1.
+    RegState,       // Reading instruction, selecting registers.
     ExecuteState,   // Executing first instruction cycle.
     LoadState,      // Second cycle for loads.
     HaltState       // Something has gone wrong.
@@ -57,12 +53,10 @@ provisos (
     // byte address, so it is missing its two LSBs.
     Reg#(Bit#(addr_width)) pc <- mkReg(0);
     // Latched instruction being executed -- only valid in states past
-    // Reg2State!
+    // RegState!
     Reg#(Word) inst <- mkRegU;
-    // Latched second operand (contents addressed by rs2).
-    Reg#(Word) x2 <- mkRegU;
-    // General purpose registers (pseudo-dual-ported file).
-    RegFile1 regfile <- mkRegFile1;
+    // General purpose registers (two-read one-write file).
+    RegFile2 regfile <- mkRegFile2;
 
     ///////////////////////////////////////////////////////////////////////////
     // Internal buses and combinational circuits.
@@ -106,7 +100,7 @@ provisos (
         return action
             mem_addr_port <= next_pc;
             pc <= next_pc;
-            state <= Reg2State;
+            state <= RegState;
         endaction;
     endfunction
 
@@ -116,20 +110,13 @@ provisos (
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule read_reg_2 (state matches Reg2State);
+    rule read_reg (state matches RegState);
         // Latch the instruction we've fetched from memory.
         inst <= mem_result_port;
         // Note that in this state, we address the register file directly from
         // the data bus return path -- because we don't have the instruction
-        // latched yet! This is the only place where we do this.
-        regfile.read(mem_result_port[24:20]);
-        state <= Reg1State;
-    endrule
-
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule read_reg_1 (state matches Reg1State);
-        x2 <= regfile.read_result;
-        regfile.read(fields.rs1);
+        // latched yet!
+        regfile.read(mem_result_port[19:15], mem_result_port[24:20]);
         state <= ExecuteState;
     endrule
 
@@ -137,7 +124,7 @@ provisos (
     rule execute (state matches ExecuteState);
         let next_pc = pc + 1; // we will MUTATE this for jumps!
 
-        let x1 = regfile.read_result;
+        let {x1, x2} = regfile.read_result;
 
         // Behold, the Big Fricking RV32I Case Discriminator!
         let halting = False;

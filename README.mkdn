@@ -17,7 +17,7 @@ about the results. Numbers may be out of date.
 
 | Core | System | Target | # LCs | fmax (MHz) | MIPS |
 | :--- | :----- | :----- | ----: | ---------: | ---: |
-| Corny5 | Corny5Soc | hx1k | 1066 | 58.56 | ~19 |
+| Corny5 | Corny5Soc | hx1k | 1089 | 52.09 | ~25 |
 | Dinky5 | Dinky5Soc | hx1k | 791 | 60.64 | ~20 |
 | Tangy5 | Tangy5Soc | hx1k | 944 | 54.59 | ~27 |
 
