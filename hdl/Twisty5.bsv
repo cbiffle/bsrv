@@ -87,7 +87,8 @@ provisos (
     endrule
 
     ///////////////////////////////////////////////////////////////////////////
-    // Stage 1
+    // Stage 1 - choosing which hart to run next and starting register file
+    // read.
 
     // Each cycle we issue an instruction for a different hart. As there is no
     // backpressure in the pipeline, there are no conditions required for this
@@ -124,7 +125,9 @@ provisos (
     endrule
 
     ///////////////////////////////////////////////////////////////////////////
-    // Stage 2
+    // Stage 2 - first part of execute.
+
+    let stage3 <- mkLFIFO;
 
     // Extract register values for stage2 to avoid rule-blocking
     let stage2_state <- mkWire;
@@ -138,11 +141,69 @@ provisos (
         end
     endrule
 
+    (* fire_when_enabled *)
+    rule do_stage_2;
+        let hart = stage2.first;
+        stage2.deq;
+
+        // We're going to assume the cache contents are an instruction. If we're
+        // wrong, the result will be ignored anyway. This should reduce logic.
+        InstFields fields = unpack(caches[hart]);
+        Word imm_i = signExtend({fields.funct7, fields.rs2});
+
+        let {x1, x2} = regfile.read_result;
+
+        // Observation: the three cases for this are as follows:
+        //    'b1100011: return x2; // Bxx
+        //    'b0110011: return x2; // ALU reg
+        //    'b0010011: return imm_i; // ALU imm
+        // I had originally expressed this as those three followed by a
+        // `default: ?` case, expecting that the undefined value would make it
+        // through to Verilog and get optimized by Yosys. Bluespec, however,
+        // makes a decision on what the undefined value should be, generating
+        // more logic.
+        //
+        // Note that if you k-map that table, it's bit 5 that actually makes the
+        // decision in the defined cases. So:
+        let comp_rhs = case (fields.opcode[5]) matches
+            'b1: return x2; // Bxx, ALU reg
+            'b0: return imm_i; // ALU imm
+        endcase;
+
+        // Force structural sharing between the subtraction circuit and the
+        // comparators.
+        let diff_lo = {1'b0, x1[23:0]} + {1'b1, ~comp_rhs[23:0]} + 1;
+
+        stage3.enq(tuple5(hart, x1, x2, diff_lo, comp_rhs));
+    endrule
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Stage 3
+
+    // Extract register values for stage 3 to avoid rule-blocking
+    let stage3_state <- mkWire;
+    let stage3_pc <- mkWire;
+    rule extract_stage3_state;
+        for (Integer i = 0; i < valueOf(HartCount); i = i + 1) begin
+            if (tpl_1(stage3.first) == fromInteger(i)) begin
+                stage3_state <= states[i];
+                stage3_pc <= pcs[i];
+            end
+        end
+    endrule
+
     // The main execution path, factored out of the rule below to decrease
     // indentation creep.
-    function run_body(hart);
+    function run_body(hart, x1, x2, diff_lo, rhs);
         actionvalue
             let inst = caches[hart];
+
+            let diff_hi = {1'b0, x1[31:24]} + {1'b1, ~rhs[31:24]} + {0,
+            diff_lo[24]};
+            let difference = {diff_hi, diff_lo[23:0]};
+            let signed_less_than = unpack(
+                (x1[31] ^ rhs[31]) != 0 ? x1[31] : difference[32]);
+            let unsigned_less_than = unpack(difference[32]);
 
             InstFields fields = unpack(inst);
             Word imm_i = signExtend(inst[31:20]);
@@ -152,34 +213,9 @@ provisos (
             Word imm_b = {
                 signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
-            let next_pc = stage2_pc + 1; // we will MUTATE this for jumps!
+            let next_pc = stage3_pc + 1; // we will MUTATE this for jumps!
 
-            let {x1, x2} = regfile.read_result;
-            let pc00 = {stage2_pc, 2'b00};
-
-            // Observation: the three cases for this are as follows:
-            //    'b1100011: return x2; // Bxx
-            //    'b0110011: return x2; // ALU reg
-            //    'b0010011: return imm_i; // ALU imm
-            // I had originally expressed this as those three followed by a
-            // `default: ?` case, expecting that the undefined value would make
-            // it through to Verilog and get optimized by Yosys. Bluespec,
-            // however, makes a decision on what the undefined value should be,
-            // generating more logic.
-            //
-            // Note that if you k-map that table, it's bit 5 that actually makes
-            // the decision in the defined cases. So:
-            let comp_rhs = case (fields.opcode[5]) matches
-                'b1: return x2; // Bxx, ALU reg
-                'b0: return imm_i; // ALU imm
-            endcase;
-
-            // Force structural sharing between the subtraction circuit and the
-            // comparators.
-            let difference = zeroExtend(x1) + {1'b1, ~comp_rhs} + 1;
-            let signed_less_than = unpack(
-                (x1[31] ^ comp_rhs[31]) != 0 ? x1[31] : difference[32]);
-            let unsigned_less_than = unpack(difference[32]);
+            let pc00 = {stage3_pc, 2'b00};
 
             // Behold, the Big Fricking RV32I Case Discriminator!
             let next_state = tagged RunState;
@@ -193,12 +229,12 @@ provisos (
                 'b0010111: regfile.write(hart, fields.rd, extend(pc00 + truncate(imm_u)));
                 // JAL
                 'b1101111: begin
-                    regfile.write(hart, fields.rd, extend({stage2_pc + 1, 2'b00}));
+                    regfile.write(hart, fields.rd, extend({stage3_pc + 1, 2'b00}));
                     next_pc = truncateLSB(pc00 + truncate(imm_j));
                 end
                 // JALR
                 'b1100111: begin
-                    regfile.write(hart, fields.rd, extend({stage2_pc + 1, 2'b00}));
+                    regfile.write(hart, fields.rd, extend({stage3_pc + 1, 2'b00}));
                     next_pc = crop_addr(x1 + imm_i);
                 end
                 // Bxx
@@ -239,7 +275,6 @@ provisos (
                 // ALU reg/immediate
                 'b0?10011: begin
                     let is_reg = fields.opcode[5];
-                    let rhs = is_reg == 1 ? x2 : imm_i;
 
                     let alu_result = ?;
                     case (fields.funct3) matches
@@ -287,11 +322,11 @@ provisos (
     endfunction
 
     (* fire_when_enabled *)
-    rule do_stage_2;
-        let hart = stage2.first;
-        stage2.deq;
+    rule do_stage_3;
+        let {hart, x1, x2, diff_lo, rhs} = stage3.first;
+        stage3.deq;
 
-        let t <- case (stage2_state) matches
+        let t <- case (stage3_state) matches
             tagged ResetState: return (actionvalue
                 return tuple6(hart, stage2_pc, False, ?, stage2_pc,
                     tagged RunState);
@@ -302,7 +337,6 @@ provisos (
                     tagged RunState);
             endactionvalue);
             tagged ShiftState .flds: return (actionvalue
-                let {x1, x2} = regfile.read_result;
                 let r = case (flds.dir) matches
                     Left: {truncate(x1), 1'b0};
                     Right: {flds.fill, truncateLSB(x1)};
@@ -316,12 +350,12 @@ provisos (
                         dir: flds.dir,
                         fill: flds.fill
                     };
-                
+
                 // We'll issue a dummy fetch for the next instruction during
                 // every cycle of the shift, to maintain transaction ordering.
                 return tuple6(hart, stage2_pc, False, ?, stage2_pc, next);
             endactionvalue);
-            tagged RunState: return run_body(hart);
+            tagged RunState: return run_body(hart, x1, x2, diff_lo, rhs);
         endcase;
 
         // This seam is where you could split off a third stage by inserting a
