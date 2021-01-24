@@ -238,7 +238,7 @@ provisos (
                             alu_result = sub != 0 ? truncate(difference) : x1 + rhs;
                         end
                         'b001: begin
-                            let shift_dist = comp_rhs[4:0];
+                            let shift_dist = rhs[4:0];
                             next_state = tagged ShiftState {
                                 amt: unpack(shift_dist),
                                 rd: fields.rd,
@@ -253,7 +253,7 @@ provisos (
                         'b011: alu_result = unsigned_less_than ? 1 : 0;
                         'b100: alu_result = x1 ^ rhs; // XORI / XOR
                         'b101: begin
-                            let shift_dist = comp_rhs[4:0];
+                            let shift_dist = rhs[4:0];
                             let fill = fields.funct7[5] & x1[31];
                             next_state = tagged ShiftState {
                                 amt: unpack(shift_dist),
