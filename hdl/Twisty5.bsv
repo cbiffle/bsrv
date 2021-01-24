@@ -32,7 +32,6 @@ typedef union tagged {
     RegId LoadState;
     void HaltState;
     struct {
-        RegId rd;
         UInt#(5) amt;
         bit fill;
         ShiftDir dir;
@@ -286,7 +285,6 @@ provisos (
                             let shift_dist = rhs[4:0];
                             next_state = tagged ShiftState {
                                 amt: unpack(shift_dist),
-                                rd: fields.rd,
                                 fill: 0,
                                 dir: Left
                             };
@@ -302,7 +300,6 @@ provisos (
                             let fill = fields.funct7[5] & x1[31];
                             next_state = tagged ShiftState {
                                 amt: unpack(shift_dist),
-                                rd: fields.rd,
                                 fill: fill,
                                 dir: Right
                             };
@@ -341,12 +338,12 @@ provisos (
                     Left: {truncate(x1), 1'b0};
                     Right: {flds.fill, truncateLSB(x1)};
                 endcase;
-                if (flds.amt != 0) regfile.write(hart, flds.rd, r);
+                InstFields fields = unpack(caches[hart]);
+                if (flds.amt != 0) regfile.write(hart, fields.rd, r);
 
                 let next = (flds.amt == 0) ? tagged RunState
                     : tagged ShiftState {
                         amt: flds.amt - 1,
-                        rd: flds.rd,
                         dir: flds.dir,
                         fill: flds.fill
                     };
