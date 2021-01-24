@@ -37,6 +37,38 @@ nextpnr_ice40_bitstream('corny_icestick',
     ],
 )
 
+bluespec_verilog('twisty_example',
+    top = 'TwistyExample.bsv',
+    modules = [
+        'mkTwisty',
+    ],
+    deps = [
+        ':Board',
+        '//hdl/examples:Twisty5Soc',
+    ],
+)
+
+yosys_design('twisty',
+    top_module = 'mkTwisty',
+    sources = [
+        ':twisty_example#mkTwisty',
+        '../../BRAM2Load.v',
+        '../../BRAM1Load.v',
+        '../../FIFOL1.v',
+    ],
+    deps = [
+        ':twisty_example',
+    ],
+)
+
+nextpnr_ice40_bitstream('twisty_icestick',
+    env = 'icestick',
+    design = ':twisty#json',
+    deps = [
+        ':twisty',
+    ],
+)
+
 bluespec_verilog('examples',
     top = 'Examples.bsv',
     modules = [

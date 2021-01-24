@@ -32,3 +32,12 @@ bluespec_library('Tangy5Soc',
         '//hdl:Tangy5',
     ],
 )
+bluespec_library('Twisty5Soc',
+    sources = [
+        'Twisty5Soc.bsv',
+    ],
+    deps = [
+        '//hdl:Common',
+        '//hdl:Twisty5',
+    ],
+)

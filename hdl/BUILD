@@ -27,3 +27,4 @@ def basic_core(name):
 basic_core('Corny5')
 basic_core('Dinky5')
 basic_core('Tangy5')
+basic_core('Twisty5')
