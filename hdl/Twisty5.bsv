@@ -24,11 +24,19 @@ interface Twisty5#(numeric type addr_width);
     method HartState next_hart_state;
 endinterface
 
+typedef enum { Left, Right } ShiftDir deriving (Bits, FShow);
+
 typedef union tagged {
     void ResetState;
     void RunState;
     RegId LoadState;
     void HaltState;
+    struct {
+        RegId rd;
+        UInt#(5) amt;
+        bit fill;
+        ShiftDir dir;
+    } ShiftState;
 } HartState deriving (Bits, FShow);
 
 module mkTwisty5#(TwistyBus#(addr_width) bus) (Twisty5#(addr_width))
@@ -110,19 +118,8 @@ provisos (
     // does not express this.
     (* fire_when_enabled *)
     rule do_stage_1;
-        case (cur_state) matches
-            tagged RunState: begin
-                InstFields fields = unpack(caches[next_hart]);
-                regfile.read(next_hart, fields.rs1, fields.rs2);
-            end
-
-            // These states do not need to trigger a regfile read, and in fact
-            // it keeps turning out to be cheaper to not enable the regfile than
-            // to have them issue dummy reads. Surprising? I thought so. Worth a
-            // TODO.
-            tagged ResetState: noAction;
-            tagged LoadState .*: noAction;
-        endcase
+        InstFields fields = unpack(caches[next_hart]);
+        regfile.read(next_hart, fields.rs1, fields.rs2);
         stage2.enq(next_hart);
     endrule
 
@@ -173,17 +170,6 @@ provisos (
             let signed_less_than = unpack(
                 (x1[31] ^ comp_rhs[31]) != 0 ? x1[31] : difference[32]);
             let unsigned_less_than = unpack(difference[32]);
-
-            // Force structural sharing for the shifters. Shifters are expensive,
-            // we only want one generated.
-            let shifter_lhs = case (fields.funct3) matches
-                'b001: return reverseBits(x1);
-                'b100: return x1;
-                default: return ?;
-            endcase;
-            bit shift_fill = msb(shifter_lhs) & fields.funct7[5];
-            Int#(33) shift_ext = unpack({shift_fill, shifter_lhs});
-            let shifter_out = truncate(pack(shift_ext >> comp_rhs[4:0]));
 
             // Behold, the Big Fricking RV32I Case Discriminator!
             let next_state = tagged RunState;
@@ -245,21 +231,41 @@ provisos (
                     let is_reg = fields.opcode[5];
                     let rhs = is_reg == 1 ? x2 : imm_i;
 
-                    let alu_result = case (fields.funct3) matches
+                    let alu_result = ?;
+                    case (fields.funct3) matches
                         'b000: begin // ADDI / ADD / SUB
                             let sub = is_reg & fields.funct7[5];
-                            return sub != 0 ? truncate(difference) : x1 + rhs;
+                            alu_result = sub != 0 ? truncate(difference) : x1 + rhs;
                         end
-                        'b001: return reverseBits(shifter_out); // SLLI / SLL
+                        'b001: begin
+                            let shift_dist = comp_rhs[4:0];
+                            next_state = tagged ShiftState {
+                                amt: unpack(shift_dist),
+                                rd: fields.rd,
+                                fill: 0,
+                                dir: Left
+                            };
+                            alu_result = x1;
+                        end
                         // SLTI / SLT
-                        'b010: return signed_less_than ? 1 : 0;
+                        'b010: alu_result = signed_less_than ? 1 : 0;
                         // SLTIU / SLTU
-                        'b011: return unsigned_less_than ? 1 : 0;
-                        'b100: return x1 ^ rhs; // XORI / XOR
-                        'b101: return shifter_out;
-                        'b110: return x1 | rhs; // ORI / OR
-                        'b111: return x1 & rhs; // ANDI / AND
-                    endcase;
+                        'b011: alu_result = unsigned_less_than ? 1 : 0;
+                        'b100: alu_result = x1 ^ rhs; // XORI / XOR
+                        'b101: begin
+                            let shift_dist = comp_rhs[4:0];
+                            let fill = fields.funct7[5] & comp_rhs[31];
+                            next_state = tagged ShiftState {
+                                amt: unpack(shift_dist),
+                                rd: fields.rd,
+                                fill: fill,
+                                dir: Right
+                            };
+                            alu_result = x1;
+                        end
+                        'b110: alu_result = x1 | rhs; // ORI / OR
+                        'b111: alu_result = x1 & rhs; // ANDI / AND
+                    endcase
                     regfile.write(hart, fields.rd, alu_result);
                 end
                 default: next_state = tagged HaltState;
@@ -284,6 +290,26 @@ provisos (
                 regfile.write(hart, rd, caches[hart]);
                 return tuple6(hart, stage2_pc, False, ?, stage2_pc,
                     tagged RunState);
+            endactionvalue);
+            tagged ShiftState .flds: return (actionvalue
+                let {x1, x2} = regfile.read_result;
+                let r = case (flds.dir) matches
+                    Left: {truncate(x1), flds.fill};
+                    Right: {flds.fill, truncateLSB(x1)};
+                endcase;
+                if (flds.amt != 0) regfile.write(hart, flds.rd, r);
+
+                let next = (flds.amt == 0) ? tagged RunState
+                    : tagged ShiftState {
+                        amt: flds.amt - 1,
+                        rd: flds.rd,
+                        dir: flds.dir,
+                        fill: flds.fill
+                    };
+                
+                // We'll issue a dummy fetch for the next instruction during
+                // every cycle of the shift, to maintain transaction ordering.
+                return tuple6(hart, stage2_pc, False, ?, stage2_pc, next);
             endactionvalue);
             tagged RunState: return run_body(hart);
         endcase;
