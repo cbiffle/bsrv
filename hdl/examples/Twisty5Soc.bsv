@@ -21,16 +21,13 @@ module mkTwisty5Soc (Twisty5Soc);
     BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1Load(256, False, "../hdl/examples/demoprog.readmemb", True);
 
     let issue_wire <- mkWire;
-    let valid <- mkReg(False);
-    let read_wire <- mkWire;
 
     Twisty5#(8) core <- mkTwisty5(interface TwistyBus#(8);
         method Action issue(Bit#(8) address, Bool write, Word data);
             issue_wire <= tuple3(write, address, data);
-            valid <= True;
         endmethod
         method Word response;
-            return read_wire;
+            return ram.read;
         endmethod
     endinterface);
 
@@ -38,11 +35,6 @@ module mkTwisty5Soc (Twisty5Soc);
     rule drive_ram;
         let {w, a, d} = issue_wire;
         ram.put(w, a, d);
-    endrule
-
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule read_ram if (valid);
-        read_wire <= ram.read;
     endrule
 
     method Bit#(5) led = truncate(pack(core.next_hart_state));

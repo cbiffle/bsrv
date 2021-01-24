@@ -10,7 +10,7 @@ import Twisty5::*;
 (* synthesize *)
 module mkTb ();
     let issue_wire <- mkRWire;
-    Wire#(Word) response_wire <- mkWire;
+    Wire#(Word) response_wire <- mkDWire(?);
 
     let bus = (interface TwistyBus#(14);
         method Action issue(Bit#(14) address, Bool write, Word data);
@@ -41,17 +41,23 @@ module mkTb ();
     endrule
 
     mkAutoFSM(seq
-        delay(2); // 0 -> *
-        action // 1 -> 0
+        action
             if (delayed_issue matches tagged Valid {0, False, .*}) noAction;
             else dynamicAssert(False, "initial fetch was bogus");
+            // LUI x2, 0xDEADB000
             response_wire <= 'b1101_1110_1010_1101_1011_00010_0110111;
         endaction
         delay(fromInteger(valueOf(HartCount)) - 1);
         action
             if (delayed_issue matches tagged Valid {1, False, .*}) noAction;
             else dynamicAssert(False, "second fetch was bogus");
-            response_wire <= 'b1101_1110_1010_1101_1011_00010_0110111;
+            // SW x2, (x0)
+            response_wire <= 'b0000000_00010_00000_010_00000_0100011;
+        endaction
+        delay(fromInteger(valueOf(HartCount)) - 1);
+        action
+            if (delayed_issue matches tagged Valid {0, True, 'hDEADB000}) noAction;
+            else dynamicAssert(False, "store transaction was bogus.");
         endaction
          
         test_complete <= True;
