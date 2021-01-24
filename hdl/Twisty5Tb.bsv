@@ -41,7 +41,7 @@ module mkTb ();
     endrule
 
     mkAutoFSM(seq
-        delay(1); // 0 -> *
+        delay(2); // 0 -> *
         action // 1 -> 0
             if (delayed_issue matches tagged Valid {0, False, .*}) noAction;
             else dynamicAssert(False, "initial fetch was bogus");
