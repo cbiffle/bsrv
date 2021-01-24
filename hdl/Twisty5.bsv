@@ -254,7 +254,7 @@ provisos (
                         'b100: alu_result = x1 ^ rhs; // XORI / XOR
                         'b101: begin
                             let shift_dist = comp_rhs[4:0];
-                            let fill = fields.funct7[5] & comp_rhs[31];
+                            let fill = fields.funct7[5] & x1[31];
                             next_state = tagged ShiftState {
                                 amt: unpack(shift_dist),
                                 rd: fields.rd,
@@ -294,7 +294,7 @@ provisos (
             tagged ShiftState .flds: return (actionvalue
                 let {x1, x2} = regfile.read_result;
                 let r = case (flds.dir) matches
-                    Left: {truncate(x1), flds.fill};
+                    Left: {truncate(x1), 1'b0};
                     Right: {flds.fill, truncateLSB(x1)};
                 endcase;
                 if (flds.amt != 0) regfile.write(hart, flds.rd, r);
