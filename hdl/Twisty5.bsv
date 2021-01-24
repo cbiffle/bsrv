@@ -157,11 +157,21 @@ provisos (
             let {x1, x2} = regfile.read_result;
             let pc00 = {stage2_pc, 2'b00};
 
-            let comp_rhs = case (fields.opcode) matches
-                'b1100011: return x2; // Bxx
-                'b0110011: return x2; // ALU reg
-                'b0010011: return imm_i; // ALU imm
-                default: return ?;
+            // Observation: the three cases for this are as follows:
+            //    'b1100011: return x2; // Bxx
+            //    'b0110011: return x2; // ALU reg
+            //    'b0010011: return imm_i; // ALU imm
+            // I had originally expressed this as those three followed by a
+            // `default: ?` case, expecting that the undefined value would make
+            // it through to Verilog and get optimized by Yosys. Bluespec,
+            // however, makes a decision on what the undefined value should be,
+            // generating more logic.
+            //
+            // Note that if you k-map that table, it's bit 5 that actually makes
+            // the decision in the defined cases. So:
+            let comp_rhs = case (fields.opcode[5]) matches
+                'b1: return x2; // Bxx, ALU reg
+                'b0: return imm_i; // ALU imm
             endcase;
 
             // Force structural sharing between the subtraction circuit and the
