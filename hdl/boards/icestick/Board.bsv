@@ -22,6 +22,12 @@ interface Top;
 
     (* always_ready, always_enabled *)
     method Bit#(5) led;
+
+    (* always_ready, always_enabled *)
+    method bit dcd_n;
+
+    (* always_ready, always_enabled *)
+    method Bit#(8) logic_port;
 endinterface
 
 endpackage : Board

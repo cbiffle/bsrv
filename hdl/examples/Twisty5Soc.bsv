@@ -13,18 +13,25 @@ import Common::*;
 import Twisty5::*;
 
 interface Twisty5Soc;
-    method Bit#(5) led;
+    method Bit#(32) out;
+    method HartId next_hart_id;
+    method HartState next_hart_state;
 endinterface
 
 (* synthesize *)
 module mkTwisty5Soc (Twisty5Soc);
-    BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1Load(256, False, "../hdl/examples/demoprog.readmemb", True);
+    BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1Load(256, False,
+        "../hdl/examples/twisty.readmemb", True);
 
     let issue_wire <- mkWire;
+    let outport <- mkReg(0);
 
-    Twisty5#(8) core <- mkTwisty5(interface TwistyBus#(8);
-        method Action issue(Bit#(8) address, Bool write, Word data);
-            issue_wire <= tuple3(write, address, data);
+    Twisty5#(9) core <- mkTwisty5(interface TwistyBus#(9);
+        method Action issue(Bit#(9) address, Bool write, Word data);
+            let {io, addr} = split(address);
+            if (io == 1'b1) begin
+                if (write) outport <= data;
+            end else issue_wire <= tuple3(write, addr, data);
         endmethod
         method Word response;
             return ram.read;
@@ -37,7 +44,9 @@ module mkTwisty5Soc (Twisty5Soc);
         ram.put(w, a, d);
     endrule
 
-    method Bit#(5) led = truncate(pack(core.next_hart_state));
+    method Bit#(32) out = outport;
+    method HartId next_hart_id = core.next_hart_id;
+    method HartState next_hart_state = core.next_hart_state;
 endmodule
 
 endpackage
