@@ -1,3 +1,25 @@
+// Twisty5 is an attempt at squeezing a lot of RISC-V performance out of a
+// cheap FPGA through hardware multithreading.
+//
+// This is the result of three observations:
+// 1. iCE40 BRAM primitives are just about 4x larger than we need for RV32I.
+// 2. High clock rates mean small pipeline stages, which in a single-thread
+//    processor mean deep pipelines and bypass circuits. Bypass circuits are
+//    relatively expensive on FPGAs because of the wide muxes they place on the
+//    critical path and the routing resources they consume.
+// 3. Concurrency is awesome.
+//
+// Twisty5 always runs four threads. It also has a four-stage pipeline. This is
+// not a coincidence: each thread "occupies" a single pipeline stage at any
+// given time, and only one instruction from a given thread is executing at any
+// time.
+//
+// You can think of the system as alternating between threads at each clock
+// cycle. Each thread takes 4 system clock cycles to execute most instructions,
+// so at 80MHz system clock each thread runs at 20MIPS. (Load and store
+// instructions take twice as long due to bus contention, and shift
+// instructions take a rather long time to save space.)
+
 package Twisty5;
 
 import BRAMCore::*;
@@ -102,6 +124,7 @@ endinstance
 
 typedef struct {
     CoreState#(addr_width) cs;
+    Maybe#(Tuple2#(RegId, Word)) rf_write;
 } Stage4#(numeric type addr_width) deriving (Bits, FShow);
 
 instance DefaultValue#(Stage4#(addr_width));
@@ -111,6 +134,7 @@ instance DefaultValue#(Stage4#(addr_width));
             , pc: 3 * 2
             , state: tagged ResetState
             }
+        , rf_write: tagged Invalid
         };
 endinstance
 
@@ -222,7 +246,7 @@ provisos (
             Word imm_b = {
                 signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
-            let next_pc = s.cs.pc + 1; // we will MUTATE this for jumps!
+            Bit#(addr_width) next_pc = s.cs.pc + 1; // we will MUTATE this for jumps!
 
             let pc00 = {s.cs.pc, 2'b00};
 
@@ -231,19 +255,20 @@ provisos (
             let mem_write = False;
             let mem_data = ?;
             let other_addr = tagged Invalid;
+            Maybe#(Tuple2#(RegId, Word)) rf_write = tagged Invalid;
             case (fields.opcode) matches
                 // LUI
-                'b0110111: regfile.write(s.cs.hart, fields.rd, imm_u);
+                'b0110111: rf_write = tagged Valid tuple2(fields.rd, imm_u);
                 // AUIPC
-                'b0010111: regfile.write(s.cs.hart, fields.rd, extend(pc00 + truncate(imm_u)));
+                'b0010111: rf_write = tagged Valid tuple2(fields.rd, extend(pc00 + truncate(imm_u)));
                 // JAL
                 'b1101111: begin
-                    regfile.write(s.cs.hart, fields.rd, extend({s.cs.pc + 1, 2'b00}));
                     next_pc = truncateLSB(pc00 + truncate(imm_j));
+                    rf_write = tagged Valid tuple2(fields.rd, {0, s.cs.pc + 1, 2'b00});
                 end
                 // JALR
                 'b1100111: begin
-                    regfile.write(s.cs.hart, fields.rd, extend({s.cs.pc + 1, 2'b00}));
+                    rf_write = tagged Valid tuple2(fields.rd, extend({s.cs.pc + 1, 2'b00}));
                     next_pc = crop_addr(s.x1 + imm_i);
                 end
                 // Bxx
@@ -320,7 +345,7 @@ provisos (
                         'b110: alu_result = s.x1 | s.rhs; // ORI / OR
                         'b111: alu_result = s.x1 & s.rhs; // ANDI / AND
                     endcase
-                    regfile.write(s.cs.hart, fields.rd, alu_result);
+                    rf_write = tagged Valid tuple2(fields.rd, alu_result);
                 end
                 default: next_state = tagged HaltState;
             endcase
@@ -332,6 +357,7 @@ provisos (
                     , pc: next_pc
                     , state: next_state
                     }
+                , rf_write: rf_write
                 };
             let ba = tuple3(mem_write, a, mem_data);
             return tuple2(s4, ba);
@@ -351,18 +377,18 @@ provisos (
                         , pc: s.cs.pc
                         , state: tagged RunState
                         }
+                    , rf_write: tagged Invalid
                     };
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
             tagged LoadState .rd: return (actionvalue
-                regfile.write(s.cs.hart, rd, s.cache);
-
                 let s4 = Stage4
                     { cs: CoreState
                         { hart: s.cs.hart
                         , pc: s.cs.pc
                         , state: tagged RunState
                         }
+                    , rf_write: tagged Valid tuple2(rd, s.cache)
                     };
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
@@ -372,7 +398,9 @@ provisos (
                     Right: {flds.fill, truncateLSB(s.x1)};
                 endcase;
                 InstFields fields = unpack(s.cache);
-                if (flds.amt != 0) regfile.write(s.cs.hart, fields.rd, r);
+                let rf_write = (flds.amt != 0)
+                    ? tagged Valid tuple2(fields.rd, r)
+                    : tagged Invalid;
 
                 let next = (flds.amt == 0)
                     ? tagged RunState
@@ -388,6 +416,7 @@ provisos (
                         , pc: s.cs.pc
                         , state: next
                         }
+                    , rf_write: rf_write
                     };
 
                 // We'll issue a dummy fetch for the next instruction during
@@ -396,7 +425,7 @@ provisos (
             endactionvalue);
             tagged RunState: return run_body(s);
             tagged HaltState: return (actionvalue
-                let s4 = Stage4 { cs: s.cs };
+                let s4 = Stage4 { cs: s.cs, rf_write: tagged Invalid };
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
         endcase;
@@ -416,6 +445,9 @@ provisos (
     rule do_stage_4;
         let response = bus.response;
         let s = stage4;
+
+        if (s.rf_write matches tagged Valid {.rd, .value})
+            regfile.write(s.cs.hart, rd, value);
 
         stage1_wire <= Stage1
             { cs: s.cs
