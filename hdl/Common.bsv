@@ -59,7 +59,7 @@ provisos (OneHotIndex#(e, n), Bits#(e, x));
     return bits[pack(state)] != 0;
 endfunction
 
-// An initiator on the DinkyBus (typically a CPU).
+// The initiator-side view of the DinkyBus.
 //
 // DinkyBus is parameterized in terms of address width. Note that addresses are
 // in terms of 32-bit words, so the maximum practical 'addr_width' given 'XLEN'
@@ -68,24 +68,22 @@ endfunction
 // This bus does not use a read strobe for simplicity (read is implied by
 // not-write), which may cause problems for read-sensitive I/O devices. I plan
 // to burn that bridge when I come to it.
-interface DinkyBusInit#(numeric type addr_width);
-    // Memory address output to bus. On cycles where memory is not being
-    // actively accessed, this output is undefined.
+interface DinkyBus#(numeric type addr_width);
+    // Issues a transaction to the bus. The bus must always be ready to accept
+    // a transaction. On read accesses (where write is False) 'data' can be
+    // anything.
     (* always_ready *)
-    method Bit#(addr_width) mem_addr;
+    method Action issue(Bit#(addr_width) address, Bool write, Word data);
 
-    // When 'True', a write is being requested; when 'False', a read.
-    (* always_ready *)
-    method Bool mem_write;
-
-    // Memory data output to bus, for writes. Undefined during reads.
-    (* always_ready *)
-    method Word mem_data;
-    
     // Memory data return from bus.
-    (* always_ready, always_enabled *)
-    method Action mem_result(Word value);
+    (* always_ready *)
+    method Word response;
 endinterface
+
+module mkDummyDinkyBus (DinkyBus#(addr_width));
+    method issue(address, write, data) = noAction;
+    method response = 'hDEADBEEF;
+endmodule
 
 ///////////////////////////////////////////////////////////////////////////////
 // Pseudo-dual-port register file compatible with iCE40 BRAM.

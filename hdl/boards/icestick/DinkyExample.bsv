@@ -1,12 +1,12 @@
-package CornyExample;
+package DinkyExample;
 
 import Board::*;
 
-import Corny5Soc::*;
+import Dinky5Soc::*;
 
 (* synthesize, default_clock_osc="clk_12mhz" *)
-module mkCorny (Top);
-    Corny5Soc soc <- mkCorny5Soc;
+module mkDinky (Top);
+    Dinky5Soc soc <- mkDinky5Soc;
 
     method led = soc.led;
     method logic_port = 0;

@@ -65,10 +65,8 @@ endmodule
 ///////////////////////////////////////////////////////////////////////////////
 // The Dinky5 CPU Core.
 
-// Core interface: DinkyBus and debug outputs.
+// Core status and debug outputs.
 interface Dinky5#(numeric type addr_width);
-    interface DinkyBusInit#(addr_width) bus;
-
     // Internal state of core, for debugging.
     (* always_ready *)
     method OneHotState core_state;
@@ -93,7 +91,7 @@ instance OneHotIndex#(State, 6);
 endinstance
 typedef Bit#(6) OneHotState;
 
-module mkDinky5 (Dinky5#(addr_width))
+module mkDinky5#(DinkyBus#(addr_width) bus) (Dinky5#(addr_width))
 provisos (
     // XLEN is >= 2
     Add#(xlen_m2, 2, XLEN),
@@ -124,15 +122,6 @@ provisos (
     ///////////////////////////////////////////////////////////////////////////
     // Internal buses and combinational circuits.
 
-    // Path from address generation to bus port.
-    Wire#(Bit#(addr_width)) mem_addr_port <- mkDWire(?);
-    // Path from write signal to bus port.
-    PulseWire mem_write_port <- mkPulseWire;
-    // Path from datapath to bus port for writes.
-    Wire#(Word) mem_data_port <- mkDWire(?);
-    // Path from bus return to datapath for reads.
-    Wire#(Word) mem_result_port <- mkBypassWire;
-
     // PC extended as a byte address, which is the version RISC-V instructions
     // want to use for arithmetic.
     let pc00 = {pc, 2'b00};
@@ -159,7 +148,7 @@ provisos (
     // instruction fetch (which is most of them).
     function Action fetch_next_instruction(Bit#(addr_width) next_pc);
         return action
-            mem_addr_port <= next_pc;
+            bus.issue(next_pc, False, ?);
             pc <= next_pc;
             state <= onehot_state(Reg2State);
         endaction;
@@ -175,11 +164,11 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule read_reg_2 (is_onehot_state(state, Reg2State));
-        inst <= mem_result_port;
+        inst <= bus.response;
         // Note that in this state, we address the register file directly from
         // the data bus return path -- because we don't have the instruction
         // latched yet! This is the only place where we do this.
-        regfile.read(mem_result_port[24:20]);
+        regfile.read(bus.response[24:20]);
         state <= onehot_state(Reg1State);
         pc_1 <= pc + 1;
     endrule
@@ -266,7 +255,7 @@ provisos (
                     'b010: begin // LW
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
-                        mem_addr_port <= truncate(word_ea);
+                        bus.issue(truncate(word_ea), False, ?);
                         loading = True;
                     end
                     default: halting = True;
@@ -278,9 +267,7 @@ provisos (
                     'b010: begin // SW
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
-                        mem_addr_port <= truncate(word_ea);
-                        mem_data_port <= x2;
-                        mem_write_port.send;
+                        bus.issue(truncate(word_ea), True, x2);
                         storing = True;
                     end
                     default: halting = True;
@@ -325,22 +312,12 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule finish_load (is_onehot_state(state, LoadState));
-        regfile.write(inst_rd, mem_result_port);
+        regfile.write(inst_rd, bus.response);
         fetch_next_instruction(pc);
     endrule
 
     ///////////////////////////////////////////////////////////////////////////
     // External port connections.
-
-    interface DinkyBusInit bus;
-        method Bit#(addr_width) mem_addr = mem_addr_port;
-        method Bool mem_write = mem_write_port;
-        method Word mem_data = mem_data_port;
-
-        method Action mem_result(Word value);
-            mem_result_port <= value;
-        endmethod
-    endinterface
 
     method OneHotState core_state;
         return state;

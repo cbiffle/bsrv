@@ -15,10 +15,8 @@ import Common::*;
 ///////////////////////////////////////////////////////////////////////////////
 // The Corny5 CPU Core.
 
-// Core interface: DinkyBus and debug outputs.
+// Core debug outputs.
 interface Corny5#(numeric type addr_width);
-    interface DinkyBusInit#(addr_width) bus;
-
     // Internal state of core, for debugging.
     (* always_ready *)
     method State core_state;
@@ -37,7 +35,7 @@ typedef enum {
     HaltState       // Something has gone wrong.
 } State deriving (Bits, FShow, Eq);
 
-module mkCorny5 (Corny5#(addr_width))
+module mkCorny5#(DinkyBus#(addr_width) bus) (Corny5#(addr_width))
 provisos (
     // XLEN is >= 2
     Add#(xlen_m2, 2, XLEN),
@@ -60,15 +58,6 @@ provisos (
 
     ///////////////////////////////////////////////////////////////////////////
     // Internal buses and combinational circuits.
-
-    // Path from address generation to bus port.
-    Wire#(Bit#(addr_width)) mem_addr_port <- mkDWire(?);
-    // Path from write signal to bus port.
-    PulseWire mem_write_port <- mkPulseWire;
-    // Path from datapath to bus port for writes.
-    Wire#(Word) mem_data_port <- mkDWire(?);
-    // Path from bus return to datapath for reads.
-    Wire#(Word) mem_result_port <- mkBypassWire;
 
     // PC extended as a byte address, which is the version RISC-V instructions
     // want to use for arithmetic.
@@ -98,7 +87,7 @@ provisos (
     // instruction fetch (which is most of them).
     function Action fetch_next_instruction(Bit#(addr_width) next_pc);
         return action
-            mem_addr_port <= next_pc;
+            bus.issue(next_pc, False, ?);
             pc <= next_pc;
             state <= RegState;
         endaction;
@@ -112,11 +101,11 @@ provisos (
     (* fire_when_enabled, no_implicit_conditions *)
     rule read_reg (state matches RegState);
         // Latch the instruction we've fetched from memory.
-        inst <= mem_result_port;
+        inst <= bus.response;
         // Note that in this state, we address the register file directly from
         // the data bus return path -- because we don't have the instruction
         // latched yet!
-        regfile.read(mem_result_port[19:15], mem_result_port[24:20]);
+        regfile.read(bus.response[19:15], bus.response[24:20]);
         state <= ExecuteState;
     endrule
 
@@ -162,7 +151,7 @@ provisos (
             'b0000011: begin
                 case (fields.funct3) matches
                     'b010: begin // LW
-                        mem_addr_port <= crop_addr(x1 + imm_i);
+                        bus.issue(crop_addr(x1 + imm_i), False, ?);
                         loading = True;
                     end
                     default: halting = True;
@@ -172,9 +161,7 @@ provisos (
             'b0100011: begin
                 case (fields.funct3) matches
                     'b010: begin // SW
-                        mem_addr_port <= crop_addr(x1 + imm_i);
-                        mem_data_port <= x2;
-                        mem_write_port.send;
+                        bus.issue(crop_addr(x1 + imm_i), True, x2);
                         storing = True;
                     end
                     default: halting = True;
@@ -221,22 +208,12 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule finish_load (state matches LoadState);
-        regfile.write(fields.rd, mem_result_port);
+        regfile.write(fields.rd, bus.response);
         fetch_next_instruction(pc);
     endrule
 
     ///////////////////////////////////////////////////////////////////////////
     // External port connections.
-
-    interface DinkyBusInit bus;
-        method Bit#(addr_width) mem_addr = mem_addr_port;
-        method Bool mem_write = mem_write_port;
-        method Word mem_data = mem_data_port;
-
-        method Action mem_result(Word value);
-            mem_result_port <= value;
-        endmethod
-    endinterface
 
     method State core_state;
         return state;

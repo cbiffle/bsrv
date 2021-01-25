@@ -72,28 +72,26 @@ nextpnr_ice40_bitstream('twisty_icestick',
     ],
 )
 
-bluespec_verilog('examples',
-    top = 'Examples.bsv',
+bluespec_verilog('dinky_example',
+    top = 'DinkyExample.bsv',
     modules = [
         'mkDinky',
-        'mkTangy',
     ],
     deps = [
         ':Board',
         '//hdl/examples:Dinky5Soc',
-        '//hdl/examples:Tangy5Soc',
     ],
 )
 
 yosys_design('dinky',
     top_module = 'mkDinky',
     sources = [
-        ':examples#mkDinky',
+        ':dinky_example#mkDinky',
         '../../support/BRAM2.v',
         '../../support/BRAM1Load.v',
     ],
     deps = [
-        ':examples',
+        ':dinky_example',
     ],
 )
 
@@ -105,15 +103,26 @@ nextpnr_ice40_bitstream('dinky_icestick',
     ],
 )
 
+bluespec_verilog('tangy_example',
+    top = 'TangyExample.bsv',
+    modules = [
+        'mkTangy',
+    ],
+    deps = [
+        ':Board',
+        '//hdl/examples:Tangy5Soc',
+    ],
+)
+
 yosys_design('tangy',
     top_module = 'mkTangy',
     sources = [
-        ':examples#mkTangy',
+        ':tangy_example#mkTangy',
         '../../support/BRAM2.v',
         '../../support/BRAM1.v',
     ],
     deps = [
-        ':examples',
+        ':tangy_example',
     ],
 )
 

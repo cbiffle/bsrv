@@ -9,15 +9,22 @@ import Tangy5::*;
 
 (* synthesize *)
 module mkTb ();
-    Tangy5#(14) uut <- mkTangy5;
+    let issue_wire <- mkRWire;
+    let response_wire <- mkDWire(0);
+    let bus = (interface DinkyBus;
+        method issue(a, w, d) = issue_wire.wset(tuple3(a, w, d));
+        method response = response_wire;
+    endinterface);
+
+    Tangy5#(14) uut <- mkTangy5(bus);
 
     Reg#(int) cycle <- mkReg(0);
     Reg#(Bool) test_complete <- mkReg(False);
 
-    Reg#(Bit#(14)) delayed_addr <- mkRegU;
+    let delayed_issue <- mkRegU;
 
-    rule update_delayed_addr;
-        delayed_addr <= uut.bus.mem_addr;
+    rule record_issues;
+        delayed_issue <= issue_wire.wget;
     endrule
 
     //let insn_ADD_x1_x0_x2 = 'b0000000_00000_00001_000_00010_0110011;
@@ -35,8 +42,12 @@ module mkTb ();
     );
         return seq
             par
-                dynamicAssert(delayed_addr == pc, "should have fetched PC");
-                uut.bus.mem_result(insn);
+                action
+                    if (delayed_issue matches tagged Valid {.a, False, .*})
+                        dynamicAssert(a == pc, "fetch hit wrong address");
+                    else dynamicAssert(False, "did not fetch");
+                endaction
+                response_wire <= insn;
                 dynamicAssert(uut.core_state == onehot_state(RegState),
                     "reg state");
             endpar
@@ -63,12 +74,16 @@ module mkTb ();
     );
         return seq
             insn_cycle_exec_check(pc, insn, seq
-                dynamicAssert(uut.bus.mem_addr == ea, "load EA");
+                action
+                    if (issue_wire.wget matches tagged Valid {.a, False, .*})
+                        dynamicAssert(a == ea, "load did not read correct address");
+                    else dynamicAssert(False, "load was not issued");
+                endaction
             endseq);
             par
                 dynamicAssert(uut.core_state == onehot_state(LoadState),
                     "load state");
-                uut.bus.mem_result(loaded);
+                response_wire <= loaded;
             endpar
         endseq;
     endfunction
@@ -94,8 +109,8 @@ module mkTb ();
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule show_memaddr (!test_complete);
-        $display("MA = %0h", uut.bus.mem_addr);
+    rule show_issue (!test_complete);
+        $display("issue = ", fshow(issue_wire.wget));
     endrule
 
 endmodule

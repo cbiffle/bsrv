@@ -17,19 +17,14 @@ endinterface
 
 (* synthesize *)
 module mkTangy5Soc (Tangy5Soc);
-    Tangy5#(8) core <- mkTangy5;
-
     BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1(256, False);
 
-    rule memory_drive;
-        ram.put(core.bus.mem_write, core.bus.mem_addr, core.bus.mem_data);
-    endrule
+    Tangy5#(8) core <- mkTangy5(interface DinkyBus;
+        method issue(a, w, d) = ram.put(w, a, d);
+        method response = ram.read;
+    endinterface);
 
-    rule memory_result;
-        core.bus.mem_result(ram.read);
-    endrule
-
-    method Bit#(5) led = truncate(core.bus.mem_addr);
+    method Bit#(5) led = extend(core.core_state);
 endmodule
 
 endpackage
