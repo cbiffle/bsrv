@@ -44,6 +44,7 @@ bluespec_verilog('twisty_example',
     ],
     deps = [
         ':Board',
+        '//hdl/fams/ice40:Ice40Pll',
         '//hdl/examples:Twisty5Soc',
     ],
 )

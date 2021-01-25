@@ -25,6 +25,8 @@ module mkTwisty5Soc (Twisty5Soc);
 
     let issue_wire <- mkWire;
     let outport <- mkReg(0);
+    let outport1 <- mkReg(0);
+    let outport2 <- mkReg(0);
 
     Twisty5#(9) core <- mkTwisty5(interface TwistyBus#(9);
         method Action issue(Bit#(9) address, Bool write, Word data);
@@ -44,7 +46,13 @@ module mkTwisty5Soc (Twisty5Soc);
         ram.put(w, a, d);
     endrule
 
-    method Bit#(32) out = outport;
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule clock_outport;
+        outport1 <= outport;
+        outport2 <= outport1;
+    endrule
+
+    method Bit#(32) out = outport2;
     method HartId next_hart_id = core.next_hart_id;
     method HartState next_hart_state = core.next_hart_state;
 endmodule
