@@ -49,7 +49,8 @@ endinterface
 // BRAM-based register file implementation.
 (* synthesize *)
 module mkRegFile (RegFile);
-    BRAM_DUAL_PORT#(RegId, Word) regfile <- mkBRAMCore2(valueof(RegCount), False);
+    BRAM_DUAL_PORT#(RegId, Word) regfile <- mkBRAMCore2Load(valueof(RegCount), False,
+        "../hdl/zero-register-set.readmemb", True);
 
     method Action read(RegId index);
         regfile.a.put(False, index, ?);
@@ -222,7 +223,7 @@ provisos (
             end
             // AUIPC
             'b0010111: begin
-                regfile.write(inst_rd, extend(pc00 + truncate(imm_u)));
+                regfile.write(inst_rd, extend(pc00) + imm_u);
             end
             // JAL
             'b1101111: begin

@@ -87,7 +87,7 @@ yosys_design('dinky',
     top_module = 'mkDinky',
     sources = [
         ':dinky_example#mkDinky',
-        '../../support/BRAM2.v',
+        '../../support/BRAM2Load.v',
         '../../support/BRAM1Load.v',
     ],
     deps = [
