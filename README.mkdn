@@ -6,6 +6,17 @@ The "official" RISC-V implementations in Bluespec are ... very elaborate and
 difficult to understand. So, in a quest for better understanding, I've written
 my own.
 
+- `Corny5` is a fairly literal gloss of the RV32I spec, explicitly optimized for
+  clarity rather than speed or area. It is reasonably speedy but huge. 2 cycles
+  per instruction (CPI).
+- `Dinky5` is explicitly optimized for area and resources. In particular, it
+  uses half the iCE40 BRAMs of the other designs. 3-4 CPI.
+- `Tangy5` is intended to be optimized for speed, but to be honest I got kind of
+  bored with it. 2 CPI.
+- `Twisty5` is a four-thread barrel processor offering roughly four times the
+  throughput of the other cores in about the same area. 4-8 CPI in terms of the
+  system clock.
+
 This is currently intended as an experiment and educational resource, and I make
 no arguments about this being the bestest RISC-V ever (or even that it is
 correct).
@@ -15,11 +26,12 @@ correct).
 This is mostly for my reference, when I return to this project later wondering
 about the results. Numbers may be out of date.
 
-| Core | System | Target | # LCs | fmax (MHz) | MIPS |
-| :--- | :----- | :----- | ----: | ---------: | ---: |
-| Corny5 | Corny5Soc | hx1k | 1089 | 52.09 | ~25 |
-| Dinky5 | Dinky5Soc | hx1k | 791 | 60.64 | ~20 |
-| Tangy5 | Tangy5Soc | hx1k | 944 | 54.59 | ~27 |
+| Core | System | Target | # LCs | fmax (MHz) | MIPS/thread | #threads |
+| :--- | :----- | :----- | ----: | ---------: | ----------: | -------: |
+| Corny5 | Corny5Soc | hx1k | 1089 | 52.09 | ~25 | 1 |
+| Dinky5 | Dinky5Soc | hx1k | 791 | 60.64 | ~20 | 1 |
+| Tangy5 | Tangy5Soc | hx1k | 767 | 53.27 | ~25 | 1 |
+| Twisty5 | Twisty5Soc | hx1k | 866 | 81.16 | ~20 | 4 |
 
 # License / copyright
 
