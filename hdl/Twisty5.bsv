@@ -53,7 +53,7 @@ instance DefaultValue#(Stage1#(addr_width));
     defaultValue = Stage1
         { cs: CoreState
             { hart: 2
-            , pc: 8
+            , pc: 2 * 2
             , state: tagged ResetState
             }
         , cache: 0
@@ -69,7 +69,7 @@ instance DefaultValue#(Stage2#(addr_width));
     defaultValue = Stage2
         { cs: CoreState
             { hart: 1
-            , pc: 4
+            , pc: 1 * 2
             , state: tagged ResetState
             }
         , cache: 0
@@ -89,7 +89,7 @@ instance DefaultValue#(Stage3#(addr_width));
     defaultValue = Stage3
         { cs: CoreState
             { hart: 0
-            , pc: 0
+            , pc: 0 * 2
             , state: tagged ResetState
             }
         , cache: 0
@@ -108,7 +108,7 @@ instance DefaultValue#(Stage4#(addr_width));
     defaultValue = Stage4
         { cs: CoreState
             { hart: 3
-            , pc: 12
+            , pc: 3 * 2
             , state: tagged ResetState
             }
         };
@@ -395,6 +395,10 @@ provisos (
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
             tagged RunState: return run_body(s);
+            tagged HaltState: return (actionvalue
+                let s4 = Stage4 { cs: s.cs };
+                return tuple2(s4, tuple3(False, s.cs.pc, ?));
+            endactionvalue);
         endcase;
 
         let {s4, busreq} = t;
