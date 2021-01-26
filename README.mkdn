@@ -26,12 +26,14 @@ correct).
 This is mostly for my reference, when I return to this project later wondering
 about the results. Numbers may be out of date.
 
-| Core | System | Target | # LCs | fmax (MHz) | MIPS/thread | #threads |
-| :--- | :----- | :----- | ----: | ---------: | ----------: | -------: |
-| Corny5 | Corny5Soc | hx1k | 1124 | 54.58 | ~25 | 1 |
-| Dinky5 | Dinky5Soc | hx1k | 830 | 55.42 | ~18 | 1 |
-| Tangy5 | Tangy5Soc | hx1k | 799 | 52.73 | ~25 | 1 |
-| Twisty5 | Twisty5Soc | hx1k | 861 | 83.48 | ~21 | 4 |
+| Core | Target | Shifter | # LCs | fmax (MHz) | MIPS/thread | #threads |
+| :--- | :----- | ------: | ----: | ---------: | ----------: | -------: |
+| Corny5 | hx1k | barrel | 1124 | 54.58 | ~25 | 1 |
+| Dinky5 | hx1k | barrel | 657 | 61.90 | ~20 | 1 |
+| Tangy5 | hx1k | barrel | 799 | 52.73 | ~25 | 1 |
+| Twisty5 | hx1k | serial | 861 | 83.48 | ~20 | 4 |
+| Twisty5 | hx1k | leap | 928 | 83.37 | ~20 | 4 |
+| Twisty5 | hx1k | barrel| 1038 | 78.72 | ~20 | 4 |
 
 # License / copyright
 

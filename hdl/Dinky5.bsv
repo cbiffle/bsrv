@@ -6,8 +6,11 @@
 // purposes) without doing anything truly nuts like going bitserial. (Part of
 // being useful is having reasonable performance.)
 //
-// - Not pipelined, though fetch and execute are overlapped; most instructions
-//   take 3 cycles, loads and stores take 4.
+// - Not pipelined, though fetch and execute are overlapped.
+// - Most instructions take 3 cycles.
+// - Loads and stores, 4.
+// - Does not include a barrel shifter, for area reasons, so shifts take 3 +
+//   number of positions shifted.
 // - Supports most of RV32I. Currently missing: byte and halfword memory
 //   accesses, FENCE, SYSTEM.
 // - Halts on unsupported opcodes to simplify debugging.
@@ -86,12 +89,13 @@ typedef enum {
     Reg1State,      // Latching x2, selecting rs1.
     ExecuteState,   // Executing first instruction cycle.
     LoadState,      // Second cycle for loads.
+    ShiftState,     // Processing a serial shift operation.
     HaltState       // Something has gone wrong.
 } State deriving (Bounded, Bits, FShow, Eq);
 
-instance OneHotIndex#(State, 6);
+instance OneHotIndex#(State, 7);
 endinstance
-typedef Bit#(6) OneHotState;
+typedef Bit#(7) OneHotState;
 
 module mkDinky5#(DinkyBus#(addr_width) bus) (Dinky5#(addr_width))
 provisos (
@@ -163,7 +167,7 @@ provisos (
     endfunction
 
     // Explain our use of one-hot state encoding to the compiler.
-    (* mutually_exclusive = "just_fetch, read_reg_1, read_reg_2, execute, finish_load" *)
+    (* mutually_exclusive = "just_fetch, read_reg_1, read_reg_2, execute, finish_load, keep_shifting" *)
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule just_fetch (is_onehot_state(state, JustFetchState));
@@ -214,19 +218,9 @@ provisos (
             (x1[31] ^ comp_rhs[31]) != 0 ? x1[31] : difference[32]);
         let unsigned_less_than = unpack(difference[32]);
 
-        // Force structural sharing for the shifters. Shifters are expensive,
-        // we only want one generated.
-        let shifter_lhs = case (inst_funct3) matches
-            'b001: return reverseBits(x1);
-            'b100: return x1;
-            default: return ?;
-        endcase;
-        bit shift_fill = msb(shifter_lhs) & inst_funct7[5];
-        Int#(33) shift_ext = unpack({shift_fill, shifter_lhs});
-        let shifter_out = truncate(pack(shift_ext >> comp_rhs[4:0]));
-
         // Behold, the Big Fricking RV32I Case Discriminator!
         let halting = False;
+        let shifting = False;
         let loading = False;
         let storing = False;
         case (inst_opcode) matches
@@ -281,22 +275,41 @@ provisos (
             'b0?10011: begin
                 let is_reg = inst_opcode[5];
 
-                let alu_result = case (inst_funct3) matches
+                let alu_result = 0;
+                case (inst_funct3) matches
                     'b000: begin // ADDI / ADD / SUB
                         let sub = is_reg & inst_funct7[5];
-                        if (sub != 0) return truncate(difference);
-                        else return x1 + comp_rhs;
+                        if (sub != 0) alu_result = truncate(difference);
+                        else alu_result = x1 + comp_rhs;
                     end
-                    'b001: return reverseBits(shifter_out); // SLLI / SLL
+                    'b001: begin // SLLI / SLL
+                        let shift_amt = comp_rhs[4:0];
+                        shifting = True;
+                        comp_rhs[6:0] <= {
+                            1'b0,
+                            1'b0,
+                            comp_rhs[4:0] - 1
+                        };
+                        x2 <= x1;
+                    end
                     // SLTI / SLT
-                    'b010: return signed_less_than ? 1 : 0;
+                    'b010: alu_result = signed_less_than ? 1 : 0;
                     // SLTIU / SLTU
-                    'b011: return unsigned_less_than ? 1 : 0;
-                    'b100: return x1 ^ comp_rhs; // XORI / XOR
-                    'b101: return shifter_out; // SRLI / SRL / SRAI / SRA
-                    'b110: return x1 | comp_rhs; // ORI / OR
-                    'b111: return x1 & comp_rhs; // ANDI / AND
-                endcase;
+                    'b011: alu_result = unsigned_less_than ? 1 : 0;
+                    'b100: alu_result = x1 ^ comp_rhs; // XORI / XOR
+                    'b101: begin // SRLI / SRL / SRAI / SRA
+                        let shift_amt = comp_rhs[4:0];
+                        shifting = True;
+                        comp_rhs[6:0] <= {
+                            1, // go right
+                            x1[31] & inst_funct7[5], // fill bit
+                            comp_rhs[4:0] - 1 // remaining count
+                        };
+                        x2 <= x1;
+                    end
+                    'b110: alu_result = x1 | comp_rhs; // ORI / OR
+                    'b111: alu_result = x1 & comp_rhs; // ANDI / AND
+                endcase
                 regfile.write(inst_rd, alu_result);
             end
             default: begin
@@ -305,13 +318,35 @@ provisos (
         endcase
 
         if (halting) state <= onehot_state(HaltState);
-        else if (loading) begin
+        else if (shifting) begin
+            pc <= next_pc;
+            state <= onehot_state(ShiftState);
+        end else if (loading) begin
             pc <= next_pc;
             state <= onehot_state(LoadState);
         end else if (storing) begin
             pc <= next_pc;
             state <= onehot_state(JustFetchState);
         end else fetch_next_instruction(next_pc);
+    endrule
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule keep_shifting (is_onehot_state(state, ShiftState));
+        let amt = comp_rhs[4:0];
+        let right = comp_rhs[6];
+        let fill = comp_rhs[5];
+
+        regfile.write(inst_rd, x2);
+
+        if (amt == 0) begin
+            fetch_next_instruction(pc);
+        end else if (right == 1) begin
+            x2 <= {fill, truncateLSB(x2)};
+            comp_rhs[4:0] <= comp_rhs[4:0] - 1;
+        end else begin // left
+            x2 <= {truncate(x2), 1'b0};
+            comp_rhs[4:0] <= comp_rhs[4:0] - 1;
+        end
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
