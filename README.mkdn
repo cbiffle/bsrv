@@ -31,7 +31,7 @@ about the results. Numbers may be out of date.
 | Corny5 | Corny5Soc | hx1k | 1137 | 52.64 | ~25 | 1 |
 | Dinky5 | Dinky5Soc | hx1k | 843 | 59.16 | ~20 | 1 |
 | Tangy5 | Tangy5Soc | hx1k | 799 | 52.73 | ~25 | 1 |
-| Twisty5 | Twisty5Soc | hx1k | 870 | 85.56 | ~21 | 4 |
+| Twisty5 | Twisty5Soc | hx1k | 861 | 83.48 | ~21 | 4 |
 
 # License / copyright
 

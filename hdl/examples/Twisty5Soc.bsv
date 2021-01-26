@@ -28,7 +28,7 @@ module mkTwisty5Soc (Twisty5Soc);
     let outport1 <- mkReg(0);
     let outport2 <- mkReg(0);
 
-    Twisty5#(9) core <- mkTwisty5(interface TwistyBus#(9);
+    Twisty5#(9) core <- mkTwisty5(SerialShifter, interface TwistyBus#(9);
         method Action issue(Bit#(9) address, Bool write, Word data);
             let {io, addr} = split(address);
             if (io == 1'b1) begin

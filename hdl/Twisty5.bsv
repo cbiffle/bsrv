@@ -46,19 +46,29 @@ interface Twisty5#(numeric type addr_width);
     method HartState next_hart_state;
 endinterface
 
+typedef enum {
+    SerialShifter,
+    LeapShifter,
+    BarrelShifter
+} ShifterFlavor deriving (Eq, FShow);
+
 typedef enum { Left, Right } ShiftDir deriving (Bits, FShow);
+
+typedef union tagged {
+    BaseHartState Base;
+    struct {
+        bit fill;
+        ShiftDir dir;
+        UInt#(5) amt;
+    } ShiftState;
+} HartState deriving (Bits, FShow);
 
 typedef union tagged {
     void ResetState;
     void RunState;
     RegId LoadState;
     void HaltState;
-    struct {
-        UInt#(5) amt;
-        bit fill;
-        ShiftDir dir;
-    } ShiftState;
-} HartState deriving (Bits, FShow);
+} BaseHartState deriving (Bits, FShow);
 
 typedef struct {
     HartId hart;
@@ -76,7 +86,7 @@ instance DefaultValue#(Stage1#(addr_width));
         { cs: CoreState
             { hart: 2
             , pc: 2 * 2
-            , state: tagged ResetState
+            , state: tagged Base tagged ResetState
             }
         , cache: 0
         };
@@ -92,7 +102,7 @@ instance DefaultValue#(Stage2#(addr_width));
         { cs: CoreState
             { hart: 1
             , pc: 1 * 2
-            , state: tagged ResetState
+            , state: tagged Base tagged ResetState
             }
         , cache: 0
         };
@@ -112,7 +122,7 @@ instance DefaultValue#(Stage3#(addr_width));
         { cs: CoreState
             { hart: 0
             , pc: 0 * 2
-            , state: tagged ResetState
+            , state: tagged Base tagged ResetState
             }
         , cache: 0
         , x1: 0
@@ -132,13 +142,16 @@ instance DefaultValue#(Stage4#(addr_width));
         { cs: CoreState
             { hart: 3
             , pc: 3 * 2
-            , state: tagged ResetState
+            , state: tagged Base tagged ResetState
             }
         , rf_write: tagged Invalid
         };
 endinstance
 
-module mkTwisty5#(TwistyBus#(addr_width) bus) (Twisty5#(addr_width))
+module mkTwisty5#(
+    ShifterFlavor shifter_flavor,
+    TwistyBus#(addr_width) bus
+) (Twisty5#(addr_width))
 provisos (
     // XLEN is >= 2
     Add#(xlen_m2, 2, XLEN),
@@ -239,6 +252,23 @@ provisos (
             let unsigned_less_than = unpack(difference[32]);
 
             InstFields fields = unpack(inst);
+
+            // This is the barrel shifter, in the cheapest formulation I've
+            // found for this FPGA technology. If parameters select a serial
+            // shifter, the output will go unused, and we are trusting in the
+            // synthesis toolchain to optimize this away.
+            // Actual cases in funct3 we're distinguishing:
+            //    'b001: return reverseBits(x1);
+            //    'b100: return x1;
+            // Manual k-mapping shows we can depend on either bit 0 or 3.
+            let shifter_lhs = case (fields.funct3[0]) matches
+                'b1: return reverseBits(s.x1);
+                'b0: return s.x1;
+            endcase;
+            bit shift_fill = msb(shifter_lhs) & fields.funct7[5];
+            Int#(33) shift_ext = unpack({shift_fill, shifter_lhs});
+            let shifter_out = truncate(pack(shift_ext >> s.rhs[4:0]));
+
             Word imm_i = signExtend(inst[31:20]);
             Word imm_u = {inst[31:12], 0};
             Word imm_j = {
@@ -251,7 +281,7 @@ provisos (
             let pc00 = {s.cs.pc, 2'b00};
 
             // Behold, the Big Fricking RV32I Case Discriminator!
-            let next_state = tagged RunState;
+            let next_state = tagged Base tagged RunState;
             let mem_write = False;
             let mem_data = ?;
             let other_addr = tagged Invalid;
@@ -288,22 +318,22 @@ provisos (
                 'b0000011: begin
                     case (fields.funct3) matches
                         'b010: begin // LW
-                            next_state = tagged LoadState fields.rd;
+                            next_state = tagged Base tagged LoadState fields.rd;
                             other_addr = tagged Valid crop_addr(s.x1 + imm_i);
                         end
-                        default: next_state = tagged HaltState;
+                        default: next_state = tagged Base tagged HaltState;
                     endcase
                 end
                 // Sx
                 'b0100011: begin
                     case (fields.funct3) matches
                         'b010: begin // SW
-                            next_state = tagged ResetState;
+                            next_state = tagged Base tagged ResetState;
                             other_addr = tagged Valid crop_addr(s.x1 + imm_i);
                             mem_write = True;
                             mem_data = s.x2;
                         end
-                        default: next_state = tagged HaltState;
+                        default: next_state = tagged Base tagged HaltState;
                     endcase
                 end
                 // ALU reg/immediate
@@ -318,36 +348,43 @@ provisos (
                                 ? truncate(difference)
                                 : s.x1 + s.rhs;
                         end
-                        'b001: begin
-                            let shift_dist = s.rhs[4:0];
-                            next_state = tagged ShiftState {
-                                amt: unpack(shift_dist),
-                                fill: 0,
-                                dir: Left
-                            };
-                            alu_result = s.x1;
-                        end
+                        // Left shift
+                        'b001: case (shifter_flavor) matches
+                            BarrelShifter: alu_result = reverseBits(shifter_out);
+                            default: begin
+                                let shift_dist = s.rhs[4:0];
+                                next_state = tagged ShiftState {
+                                    amt: unpack(shift_dist),
+                                    fill: 0,
+                                    dir: Left
+                                };
+                                alu_result = s.x1;
+                            end
+                        endcase
                         // SLTI / SLT
                         'b010: alu_result = signed_less_than ? 1 : 0;
                         // SLTIU / SLTU
                         'b011: alu_result = unsigned_less_than ? 1 : 0;
                         'b100: alu_result = s.x1 ^ s.rhs; // XORI / XOR
-                        'b101: begin
-                            let shift_dist = s.rhs[4:0];
-                            let fill = fields.funct7[5] & s.x1[31];
-                            next_state = tagged ShiftState {
-                                amt: unpack(shift_dist),
-                                fill: fill,
-                                dir: Right
-                            };
-                            alu_result = s.x1;
-                        end
+                        'b101: case (shifter_flavor) matches
+                            BarrelShifter: alu_result = shifter_out;
+                            default: begin
+                                let shift_dist = s.rhs[4:0];
+                                let fill = fields.funct7[5] & s.x1[31];
+                                next_state = tagged ShiftState {
+                                    amt: unpack(shift_dist),
+                                    fill: fill,
+                                    dir: Right
+                                };
+                                alu_result = s.x1;
+                            end
+                        endcase
                         'b110: alu_result = s.x1 | s.rhs; // ORI / OR
                         'b111: alu_result = s.x1 & s.rhs; // ANDI / AND
                     endcase
                     rf_write = tagged Valid tuple2(fields.rd, alu_result);
                 end
-                default: next_state = tagged HaltState;
+                default: next_state = tagged Base tagged HaltState;
             endcase
 
             let a = fromMaybe(next_pc, other_addr);
@@ -370,42 +407,50 @@ provisos (
         $display(fshow(s));
 
         let t <- case (s.cs.state) matches
-            tagged ResetState: return (actionvalue
+            tagged Base (tagged ResetState): return (actionvalue
                 let s4 = Stage4
                     { cs: CoreState
                         { hart: s.cs.hart
                         , pc: s.cs.pc
-                        , state: tagged RunState
+                        , state: tagged Base tagged RunState
                         }
                     , rf_write: tagged Invalid
                     };
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
-            tagged LoadState .rd: return (actionvalue
+            tagged Base (tagged LoadState .rd): return (actionvalue
                 let s4 = Stage4
                     { cs: CoreState
                         { hart: s.cs.hart
                         , pc: s.cs.pc
-                        , state: tagged RunState
+                        , state: tagged Base tagged RunState
                         }
                     , rf_write: tagged Valid tuple2(rd, s.cache)
                     };
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
-            tagged ShiftState .flds: return (actionvalue
-                let r = case (flds.dir) matches
-                    Left: {truncate(s.x1), 1'b0};
-                    Right: {flds.fill, truncateLSB(s.x1)};
-                endcase;
+            tagged ShiftState .flds &&& (shifter_flavor != BarrelShifter): return (actionvalue
+                let by_byte = shifter_flavor == LeapShifter && flds.amt > 8;
+                let r = by_byte ? begin
+                    case (flds.dir) matches
+                        Left: {truncate(s.x1), 8'b0};
+                        Right: {Bit#(8)'(signExtend(flds.fill)), truncateLSB(s.x1)};
+                    endcase
+                end : begin
+                    case (flds.dir) matches
+                        Left: {truncate(s.x1), 1'b0};
+                        Right: {flds.fill, truncateLSB(s.x1)};
+                    endcase
+                end;
                 InstFields fields = unpack(s.cache);
                 let rf_write = (flds.amt != 0)
                     ? tagged Valid tuple2(fields.rd, r)
                     : tagged Invalid;
 
                 let next = (flds.amt == 0)
-                    ? tagged RunState
+                    ? tagged Base tagged RunState
                     : tagged ShiftState {
-                        amt: flds.amt - 1,
+                        amt: flds.amt - (by_byte ? 8 : 1),
                         dir: flds.dir,
                         fill: flds.fill
                     };
@@ -423,8 +468,8 @@ provisos (
                 // every cycle of the shift, to maintain transaction ordering.
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
-            tagged RunState: return run_body(s);
-            tagged HaltState: return (actionvalue
+            tagged Base (tagged RunState): return run_body(s);
+            default: return (actionvalue
                 let s4 = Stage4 { cs: s.cs, rf_write: tagged Invalid };
                 return tuple2(s4, tuple3(False, s.cs.pc, ?));
             endactionvalue);
@@ -462,7 +507,7 @@ provisos (
 
     method HartId next_hart_id = stage3.cs.hart;
     method HartState next_hart_state = stage3.cs.state;
-    method Bool halted = stage3.cs.state matches HaltState ? True : False;
+    method Bool halted = stage3.cs.state matches tagged Base(tagged HaltState) ? True : False;
 endmodule
 
 ///////////////////////////////////////////////////////////////////////////////
