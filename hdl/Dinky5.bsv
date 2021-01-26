@@ -100,6 +100,12 @@ provisos (
     // addr_width is <= XLEN-2
     Add#(addr_width, dropped_addr_msbs, xlen_m2)
 );
+    // Crops a Word value for use as a smaller word address of addr_width bits.
+    function Bit#(addr_width) crop_addr(Word addr);
+        Bit#(xlen_m2) div4 = truncateLSB(addr);
+        return truncate(div4);
+    endfunction
+
     ///////////////////////////////////////////////////////////////////////////
     // State elements.
 
@@ -225,24 +231,18 @@ provisos (
         let storing = False;
         case (inst_opcode) matches
             // LUI
-            'b0110111: begin
-                regfile.write(inst_rd, imm_u);
-            end
+            'b0110111: regfile.write(inst_rd, imm_u);
             // AUIPC
-            'b0010111: begin
-                regfile.write(inst_rd, extend(pc00) + imm_u);
-            end
+            'b0010111: regfile.write(inst_rd, extend(pc00) + imm_u);
             // JAL
             'b1101111: begin
                 regfile.write(inst_rd, extend({pc_1, 2'b00}));
-                next_pc = truncateLSB(pc00 + truncate(imm_j));
+                next_pc = crop_addr(extend(pc00) + imm_j);
             end
             // JALR
             'b1100111: begin
                 regfile.write(inst_rd, extend({pc_1, 2'b00}));
-                Word full_ea = x1 + imm_i;
-                Bit#(xlen_m2) word_ea = truncateLSB(full_ea);
-                next_pc = truncate(word_ea);
+                next_pc = crop_addr(x1 + imm_i);
             end
             // Bxx
             'b1100011: begin
@@ -255,15 +255,13 @@ provisos (
                     'b111: return !unsigned_less_than;
                     default: return True;
                 endcase;
-                if (condition) next_pc = truncateLSB(pc00 + truncate(imm_b));
+                if (condition) next_pc = crop_addr(extend(pc00) + imm_b);
             end
             // Lx
             'b0000011: begin
                 case (inst_funct3) matches
                     'b010: begin // LW
-                        let byte_ea = x1 + imm_i;
-                        Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
-                        bus.issue(truncate(word_ea), False, 0);
+                        bus.issue(crop_addr(x1 + imm_i), False, 0);
                         loading = True;
                     end
                     default: halting = True;
@@ -273,9 +271,7 @@ provisos (
             'b0100011: begin
                 case (inst_funct3) matches
                     'b010: begin // SW
-                        let byte_ea = x1 + imm_i;
-                        Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
-                        bus.issue(truncate(word_ea), True, x2);
+                        bus.issue(crop_addr(x1 + imm_i), True, x2);
                         storing = True;
                     end
                     default: halting = True;
