@@ -64,12 +64,34 @@ yosys_design('twisty',
     ],
 )
 
-nextpnr_ice40_bitstream('twisty_icestick',
+nextpnr_ice40_bitstream('twisty_icestick_small',
     env = 'icestick',
     design = ':twisty#json',
     deps = [
         ':twisty',
     ],
+)
+
+nextpnr_ice40_bitstream('twisty_icestick_med',
+    env = 'icestick',
+    design = ':twisty#json',
+    deps = [
+        ':twisty',
+    ],
+    extra = {
+        'bsc_flags': ['-D TWISTY_LEAP_SHIFTER'],
+    },
+)
+
+nextpnr_ice40_bitstream('twisty_icestick_large',
+    env = 'icestick',
+    design = ':twisty#json',
+    deps = [
+        ':twisty',
+    ],
+    extra = {
+        'bsc_flags': ['-D TWISTY_BARREL_SHIFTER'],
+    },
 )
 
 bluespec_verilog('dinky_example',

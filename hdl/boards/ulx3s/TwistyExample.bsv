@@ -3,6 +3,7 @@ package TwistyExample;
 import Clocks::*;
 
 import Board::*;
+import Twisty5::*;
 import Twisty5Soc::*;
 
 (* synthesize, default_clock_osc="clk_25mhz", default_reset="btn_pwr" *)
@@ -37,7 +38,7 @@ module mkTwistyX (Top);
         else ctr <= ctr - 1;
     endrule
 
-    Twisty5Soc soc <- mkTwisty5Soc;
+    Twisty5Soc soc <- mkTwisty5Soc(BarrelShifter);
 
     let dsp <- mkDummySerialPort;
 

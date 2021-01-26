@@ -4,6 +4,7 @@ import Clocks::*;
 
 import Board::*;
 import Ice40Pll::*;
+import Twisty5::*;
 import Twisty5Soc::*;
 
 (* synthesize, default_clock_osc="clk_12mhz" *)
@@ -54,7 +55,16 @@ module mkTwistyX (Top);
         else ctr <= ctr - 1;
     endrule
 
-    Twisty5Soc soc <- mkTwisty5Soc;
+    let shifter_flavor =
+`ifdef TWISTY_BARREL_SHIFTER
+        BarrelShifter;
+`elsif TWISTY_LEAP_SHIFTER
+        LeapShifter;
+`else
+        SerialShifter;
+`endif
+
+    Twisty5Soc soc <- mkTwisty5Soc(shifter_flavor);
 
     method led = {truncate(soc.out), ctr[23]};
     method dcd_n = 0;
