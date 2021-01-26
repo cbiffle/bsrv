@@ -143,7 +143,11 @@ provisos (
                     'b101: return !(toSigned(x1) < toSigned(x2));
                     'b110: return x1 < x2;
                     'b111: return !(x1 < x2);
-                    default: return ?;
+                    // There are two condition codes for branches that are
+                    // undefined in RV32I. Let's treat them as not-taken.
+                    // (Making an explicit decision here simplifies the
+                    // output.)
+                    default: return False;
                 endcase;
                 if (condition) next_pc = crop_addr(extend(pc00) + imm_b);
             end
