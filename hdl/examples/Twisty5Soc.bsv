@@ -29,11 +29,11 @@ module mkTwisty5Soc#(ShifterFlavor shifter_flavor) (Twisty5Soc);
     let outport2 <- mkReg(0);
 
     Twisty5#(9) core <- mkTwisty5(shifter_flavor, interface TwistyBus#(9);
-        method Action issue(Bit#(9) address, Bool write, Word data);
+        method Action issue(Bit#(9) address, Maybe#(Word) write_data);
             let {io, addr} = split(address);
             if (io == 1'b1) begin
-                if (write) outport <= data;
-            end else issue_wire <= tuple3(write, addr, data);
+                if (write_data matches tagged Valid .data) outport <= data;
+            end else issue_wire <= tuple2(addr, write_data);
         endmethod
         method Word response;
             return ram.read;
@@ -42,8 +42,8 @@ module mkTwisty5Soc#(ShifterFlavor shifter_flavor) (Twisty5Soc);
 
     (* fire_when_enabled *)
     rule drive_ram;
-        let {w, a, d} = issue_wire;
-        ram.put(w, a, d);
+        let {a, wd} = issue_wire;
+        ram.put(isValid(wd), a, fromMaybe(?, wd));
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)

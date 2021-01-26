@@ -32,7 +32,7 @@ typedef Bit#(TLog#(HartCount)) HartId;
 
 interface TwistyBus#(numeric type addr_width);
     (* always_ready *)
-    method Action issue(Bit#(addr_width) address, Bool write, Word data);
+    method Action issue(Bit#(addr_width) address, Maybe#(Word) write_data);
     (* always_ready *)
     method Word response;
 endinterface
@@ -282,8 +282,7 @@ provisos (
 
             // Behold, the Big Fricking RV32I Case Discriminator!
             let next_state = tagged Base tagged RunState;
-            let mem_write = False;
-            let mem_data = ?;
+            let mem_write_data = tagged Invalid;
             let other_addr = tagged Invalid;
             Maybe#(Tuple2#(RegId, Word)) rf_write = tagged Invalid;
             case (fields.opcode) matches
@@ -330,8 +329,7 @@ provisos (
                         'b010: begin // SW
                             next_state = tagged Base tagged ResetState;
                             other_addr = tagged Valid crop_addr(s.x1 + imm_i);
-                            mem_write = True;
-                            mem_data = s.x2;
+                            mem_write_data = tagged Valid s.x2;
                         end
                         default: next_state = tagged Base tagged HaltState;
                     endcase
@@ -396,7 +394,7 @@ provisos (
                     }
                 , rf_write: rf_write
                 };
-            let ba = tuple3(mem_write, a, mem_data);
+            let ba = tuple2(a, mem_write_data);
             return tuple2(s4, ba);
         endactionvalue
     endfunction
@@ -416,7 +414,7 @@ provisos (
                         }
                     , rf_write: tagged Invalid
                     };
-                return tuple2(s4, tuple3(False, s.cs.pc, ?));
+                return tuple2(s4, tuple2(s.cs.pc, tagged Invalid));
             endactionvalue);
             tagged Base (tagged LoadState .rd): return (actionvalue
                 let s4 = Stage4
@@ -427,7 +425,7 @@ provisos (
                         }
                     , rf_write: tagged Valid tuple2(rd, s.cache)
                     };
-                return tuple2(s4, tuple3(False, s.cs.pc, ?));
+                return tuple2(s4, tuple2(s.cs.pc, tagged Invalid));
             endactionvalue);
             tagged ShiftState .flds &&& (shifter_flavor != BarrelShifter): return (actionvalue
                 let by_byte = shifter_flavor == LeapShifter && flds.amt > 8;
@@ -466,18 +464,18 @@ provisos (
 
                 // We'll issue a dummy fetch for the next instruction during
                 // every cycle of the shift, to maintain transaction ordering.
-                return tuple2(s4, tuple3(False, s.cs.pc, ?));
+                return tuple2(s4, tuple2(s.cs.pc, tagged Invalid));
             endactionvalue);
             tagged Base (tagged RunState): return run_body(s);
             default: return (actionvalue
                 let s4 = Stage4 { cs: s.cs, rf_write: tagged Invalid };
-                return tuple2(s4, tuple3(False, s.cs.pc, ?));
+                return tuple2(s4, tuple2(s.cs.pc, tagged Invalid));
             endactionvalue);
         endcase;
 
         let {s4, busreq} = t;
-        let {write, addr, data} = busreq;
-        bus.issue(addr, write, data);
+        let {addr, data} = busreq;
+        bus.issue(addr, data);
         stage4 <= s4;
     endrule
 
