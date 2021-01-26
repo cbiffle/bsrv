@@ -29,7 +29,7 @@ about the results. Numbers may be out of date.
 | Core | System | Target | # LCs | fmax (MHz) | MIPS/thread | #threads |
 | :--- | :----- | :----- | ----: | ---------: | ----------: | -------: |
 | Corny5 | Corny5Soc | hx1k | 1124 | 54.58 | ~25 | 1 |
-| Dinky5 | Dinky5Soc | hx1k | 843 | 59.16 | ~20 | 1 |
+| Dinky5 | Dinky5Soc | hx1k | 830 | 55.42 | ~18 | 1 |
 | Tangy5 | Tangy5Soc | hx1k | 799 | 52.73 | ~25 | 1 |
 | Twisty5 | Twisty5Soc | hx1k | 861 | 83.48 | ~21 | 4 |
 

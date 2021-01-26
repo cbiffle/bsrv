@@ -3,7 +3,8 @@
 //
 // The intent of this core is to produce the smallest useful RV32I core on an
 // iCE40 hx1k (i.e. leaving as many resources as possible available for other
-// purposes) without sacrificing code clarity.
+// purposes) without doing anything truly nuts like going bitserial. (Part of
+// being useful is having reasonable performance.)
 //
 // - Not pipelined, though fetch and execute are overlapped; most instructions
 //   take 3 cycles, loads and stores take 4.
@@ -53,7 +54,7 @@ module mkRegFile (RegFile);
         "../hdl/zero-register-set.readmemb", True);
 
     method Action read(RegId index);
-        regfile.a.put(False, index, ?);
+        regfile.a.put(False, index, 0);
     endmethod
 
     method Action write(RegId index, Word value);
@@ -149,7 +150,7 @@ provisos (
     // instruction fetch (which is most of them).
     function Action fetch_next_instruction(Bit#(addr_width) next_pc);
         return action
-            bus.issue(next_pc, False, ?);
+            bus.issue(next_pc, False, 0);
             pc <= next_pc;
             state <= onehot_state(Reg2State);
         endaction;
@@ -180,11 +181,17 @@ provisos (
         regfile.read(inst_rs1);
         state <= onehot_state(ExecuteState);
 
-        comp_rhs <= case (inst_opcode) matches
-            'b1100011: return regfile.read_result; // Bxx
-            'b0110011: return regfile.read_result; // ALU reg
-            'b0010011: return imm_i; // ALU imm
-            default: return ?;
+        // Actual cases we want:
+        //    'b1100011: return regfile.read_result; // Bxx
+        //    'b0110011: return regfile.read_result; // ALU reg
+        //    'b0010011: return imm_i; // ALU imm
+        // Bluespec does the wrong thing when I literally write that, so let's
+        // manually k-map this and notice that it's opcode bit 5 we want.
+        //
+        // Is this the sort of thing bsc should do? Yes, yes it is.
+        comp_rhs <= case (inst_opcode[5]) matches
+            'b1: return regfile.read_result; // Bxx, ALU reg
+            'b0: return imm_i; // ALU imm
         endcase;
     endrule
 
@@ -246,7 +253,7 @@ provisos (
                     'b101: return !signed_less_than;
                     'b110: return unsigned_less_than;
                     'b111: return !unsigned_less_than;
-                    default: return ?;
+                    default: return True;
                 endcase;
                 if (condition) next_pc = truncateLSB(pc00 + truncate(imm_b));
             end
@@ -256,7 +263,7 @@ provisos (
                     'b010: begin // LW
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
-                        bus.issue(truncate(word_ea), False, ?);
+                        bus.issue(truncate(word_ea), False, 0);
                         loading = True;
                     end
                     default: halting = True;
