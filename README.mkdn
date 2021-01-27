@@ -28,12 +28,12 @@ about the results. Numbers may be out of date.
 
 | Core | Target | Shifter | # LCs | fmax (MHz) | MIPS/thread | #threads |
 | :--- | :----- | ------: | ----: | ---------: | ----------: | -------: |
-| Corny5 | hx1k | barrel | 1124 | 54.58 | ~25 | 1 |
-| Dinky5 | hx1k | barrel | 657 | 61.90 | ~20 | 1 |
-| Tangy5 | hx1k | barrel | 799 | 52.73 | ~25 | 1 |
-| Twisty5 | hx1k | serial | 861 | 83.48 | ~20 | 4 |
-| Twisty5 | hx1k | leap | 928 | 83.37 | ~20 | 4 |
-| Twisty5 | hx1k | barrel| 1038 | 78.72 | ~20 | 4 |
+| Corny5 | hx1k | barrel | 1094 | 53.51 | ~25 | 1 |
+| Dinky5 | hx1k | barrel | 634 | 58.82 | ~20 | 1 |
+| Tangy5 | hx1k | barrel | 760 | 51.08 | ~25 | 1 |
+| Twisty5 | hx1k | serial | 860 | 84.03 | ~21 | 4 |
+| Twisty5 | hx1k | leap | 930 | 83.37 | ~20 | 4 |
+| Twisty5 | hx1k | barrel| 1030 | 74.55 | ~18 | 4 |
 
 # License / copyright
 
