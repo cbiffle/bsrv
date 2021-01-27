@@ -48,6 +48,8 @@ module mkTwisty (Top);
     return innards;
 endmodule
 
+(* synthesize *)
+(* clock_prefix = "clk_main" *)
 module mkTwistyX (Top);
     Reg#(Bit#(24)) ctr <- mkReg(12_000_000);
     rule downcount;

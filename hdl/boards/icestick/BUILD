@@ -41,6 +41,7 @@ bluespec_verilog('twisty_example',
     top = 'TwistyExample.bsv',
     modules = [
         'mkTwisty',
+        'mkTwistyX',
     ],
     deps = [
         ':Board',
@@ -53,6 +54,7 @@ yosys_design('twisty',
     top_module = 'mkTwisty',
     sources = [
         ':twisty_example#mkTwisty',
+        ':twisty_example#mkTwistyX',
         '../../support/BRAM2Load.v',
         '../../support/BRAM1Load.v',
         '../../support/MakeReset.v',
@@ -67,6 +69,7 @@ yosys_design('twisty',
 nextpnr_ice40_bitstream('twisty_icestick_small',
     env = 'icestick',
     design = ':twisty#json',
+    pre_pack = ['clocks.py'],
     deps = [
         ':twisty',
     ],
