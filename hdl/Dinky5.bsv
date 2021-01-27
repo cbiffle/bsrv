@@ -83,8 +83,10 @@ provisos (
     Reg#(Word) x2 <- mkRegU;
     // Latch on input to the magnitude comparator.
     Reg#(Word) comp_rhs <- mkRegU;
-    // Our early guess at the next PC value.
-    Reg#(Bit#(addr_width)) pc_1 <- mkRegU;
+    // Shifter state: number of bits remaining to shift.
+    Reg#(Bit#(5)) shift_amt <- mkRegU;
+    // Shifter state: bit that will be shifted in on right-shift.
+    Reg#(bit) shift_fill <- mkRegU;
 
     // General purpose registers.
     RegFile1 regfile <- mkRegFile1;
@@ -140,7 +142,6 @@ provisos (
         // latched yet! This is the only place where we do this.
         regfile.read(bus.response[24:20]);
         state <= onehot_state(Reg1State);
-        pc_1 <= pc + 1;
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -165,7 +166,7 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule execute (is_onehot_state(state, ExecuteState));
-        let next_pc = pc_1; // we will MUTATE this for jumps!
+        let next_pc = pc + 1; // we will MUTATE this for jumps!
 
         let x1 = regfile.read_result;
 
@@ -188,24 +189,27 @@ provisos (
             'b0010111: regfile.write(inst_rd, extend(pc00) + imm_u);
             // JAL
             'b1101111: begin
-                regfile.write(inst_rd, extend({pc_1, 2'b00}));
+                regfile.write(inst_rd, extend({pc + 1, 2'b00}));
                 next_pc = crop_addr(extend(pc00) + imm_j);
             end
             // JALR
             'b1100111: begin
-                regfile.write(inst_rd, extend({pc_1, 2'b00}));
+                regfile.write(inst_rd, extend({pc + 1, 2'b00}));
                 next_pc = crop_addr(x1 + imm_i);
             end
             // Bxx
             'b1100011: begin
                 let condition = case (inst_funct3) matches
-                    'b000: return x1 == comp_rhs;
-                    'b001: return x1 != comp_rhs;
+                    'b000: return x1 == x2;
+                    'b001: return x1 != x2;
                     'b100: return signed_less_than;
                     'b101: return !signed_less_than;
-                    'b110: return unsigned_less_than;
-                    'b111: return !unsigned_less_than;
-                    default: return True;
+                    // We're folding in the two undefined condition codes here
+                    // for a logic simplification. This is the sort of thing I'd
+                    // expect my toolchain to figure out for me given an omitted
+                    // or explicitly undefined default case, but it doesn't.
+                    'b?10: return unsigned_less_than;
+                    'b?11: return !unsigned_less_than;
                 endcase;
                 if (condition) next_pc = crop_addr(extend(pc00) + imm_b);
             end
@@ -241,13 +245,9 @@ provisos (
                         else alu_result = x1 + comp_rhs;
                     end
                     'b001: begin // SLLI / SLL
-                        let shift_amt = comp_rhs[4:0];
                         shifting = True;
-                        comp_rhs[6:0] <= {
-                            1'b0,
-                            1'b0,
-                            comp_rhs[4:0] - 1
-                        };
+                        shift_fill <= 0;
+                        shift_amt <= comp_rhs[4:0];
                         x2 <= x1;
                     end
                     // SLTI / SLT
@@ -256,13 +256,9 @@ provisos (
                     'b011: alu_result = unsigned_less_than ? 1 : 0;
                     'b100: alu_result = x1 ^ comp_rhs; // XORI / XOR
                     'b101: begin // SRLI / SRL / SRAI / SRA
-                        let shift_amt = comp_rhs[4:0];
                         shifting = True;
-                        comp_rhs[6:0] <= {
-                            1, // go right
-                            x1[31] & inst_funct7[5], // fill bit
-                            comp_rhs[4:0] - 1 // remaining count
-                        };
+                        shift_fill <= x1[31] & inst_funct7[5];
+                        shift_amt <= comp_rhs[4:0];
                         x2 <= x1;
                     end
                     'b110: alu_result = x1 | comp_rhs; // ORI / OR
@@ -290,20 +286,21 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule keep_shifting (is_onehot_state(state, ShiftState));
-        let amt = comp_rhs[4:0];
-        let right = comp_rhs[6];
-        let fill = comp_rhs[5];
+        let right = inst_funct3[2];
 
         regfile.write(inst_rd, x2);
 
-        if (amt == 0) begin
+        if (shift_amt == 0) begin
             fetch_next_instruction(pc);
+            // Make it clear that we don't need to gate shift_amt updates by
+            // this condition; this is a case where ? doesn't confuse bsc
+            shift_amt <= ?;
         end else if (right == 1) begin
-            x2 <= {fill, truncateLSB(x2)};
-            comp_rhs[4:0] <= comp_rhs[4:0] - 1;
+            x2 <= {shift_fill, truncateLSB(x2)};
+            shift_amt <= shift_amt - 1;
         end else begin // left
             x2 <= {truncate(x2), 1'b0};
-            comp_rhs[4:0] <= comp_rhs[4:0] - 1;
+            shift_amt <= shift_amt - 1;
         end
     endrule
 
