@@ -21,7 +21,7 @@ yosys_design('corny',
     top_module = 'mkCorny',
     sources = [
         ':corny_example#mkCorny',
-        '../../support/BRAM2.v',
+        '../../support/BRAM2Load.v',
         '../../support/BRAM1Load.v',
     ],
     deps = [
@@ -143,7 +143,7 @@ yosys_design('tangy',
     top_module = 'mkTangy',
     sources = [
         ':tangy_example#mkTangy',
-        '../../support/BRAM2.v',
+        '../../support/BRAM2Load.v',
         '../../support/BRAM1.v',
     ],
     deps = [

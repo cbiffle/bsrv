@@ -113,7 +113,8 @@ endinterface
 // BRAM-based register file implementation.
 (* synthesize *)
 module mkRegFile1 (RegFile1);
-    BRAM_DUAL_PORT#(RegId, Word) regfile <- mkBRAMCore2(valueof(RegCount), False);
+    BRAM_DUAL_PORT#(RegId, Word) regfile <- mkBRAMCore2Load(
+        valueof(RegCount), False, "../hdl/zero-register-set.readmemb", True);
 
     method Action read(RegId index);
         regfile.a.put(False, index, ?);
@@ -158,8 +159,10 @@ endinterface
 // BRAM-based register file implementation.
 (* synthesize *)
 module mkRegFile2 (RegFile2);
-    BRAM_DUAL_PORT#(RegId, Word) rf0 <- mkBRAMCore2(valueof(RegCount), False);
-    BRAM_DUAL_PORT#(RegId, Word) rf1 <- mkBRAMCore2(valueof(RegCount), False);
+    BRAM_DUAL_PORT#(RegId, Word) rf0 <- mkBRAMCore2Load(
+        valueof(RegCount), False, "../hdl/zero-register-set.readmemb", True);
+    BRAM_DUAL_PORT#(RegId, Word) rf1 <- mkBRAMCore2Load(
+        valueof(RegCount), False, "../hdl/zero-register-set.readmemb", True);
 
     method Action read(RegId rs1, RegId rs2);
         rf0.a.put(False, rs1, ?);

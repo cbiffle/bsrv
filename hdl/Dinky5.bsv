@@ -26,48 +26,6 @@ import Vector::*;
 import Common::*;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Pseudo-dual-port register file compatible with iCE40 BRAM.
-//
-// iCE40 BRAM has one dedicated read port and one dedicated write port, while
-// Bluespec expects two read/write ports. By only using read on one port and
-// write on the other, we can get an equivalent result.
-//
-// Note that synthesizing this with Yosys requires replacing Bluespec's
-// supplied BRAM Verilog with our simplified copy.
-
-interface RegFile;
-    // Starts a read of GPR 'index'. The contents will be available after the
-    // next clock edge on 'read_result'.
-    (* always_ready *)
-    method Action read(RegId index);
-
-    // Last value read from a GPR.
-    (* always_ready *)
-    method Word read_result;
-
-    // Sets register 'index' to 'value'.
-    (* always_ready *)
-    method Action write(RegId index, Word value);
-endinterface
-
-// BRAM-based register file implementation.
-(* synthesize *)
-module mkRegFile (RegFile);
-    BRAM_DUAL_PORT#(RegId, Word) regfile <- mkBRAMCore2Load(valueof(RegCount), False,
-        "../hdl/zero-register-set.readmemb", True);
-
-    method Action read(RegId index);
-        regfile.a.put(False, index, 0);
-    endmethod
-
-    method Action write(RegId index, Word value);
-        if (index != 0) regfile.b.put(True, index, value);
-    endmethod
-
-    method Word read_result = regfile.a.read;
-endmodule
-
-///////////////////////////////////////////////////////////////////////////////
 // The Dinky5 CPU Core.
 
 // Core status and debug outputs.
@@ -129,7 +87,7 @@ provisos (
     Reg#(Bit#(addr_width)) pc_1 <- mkRegU;
 
     // General purpose registers.
-    RegFile regfile <- mkRegFile;
+    RegFile1 regfile <- mkRegFile1;
 
     ///////////////////////////////////////////////////////////////////////////
     // Internal buses and combinational circuits.

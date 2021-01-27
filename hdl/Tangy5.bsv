@@ -17,56 +17,6 @@ import Vector::*;
 import Common::*;
 
 ///////////////////////////////////////////////////////////////////////////////
-// 2R1W register file designed around iCE40 pseudo-dual-port block RAM.
-//
-// iCE40 BRAM has one dedicated read port and one dedicated write port, while
-// Bluespec's BRAM modules expect two read/write ports (as on Xilinx). By only
-// using read on one port and write on the other, we can get an equivalent
-// result.
-//
-// To get two read ports, we duplicate the BRAM, reading from each copy
-// separately but writing to both.
-//
-// Note that synthesizing this with Yosys requires replacing Bluespec's
-// supplied BRAM Verilog with our simplified copy.
-
-interface RegFile;
-    // Starts a read of GPRs 'rs1' and 'rs2'. The contents will be available
-    // after the next clock edge on 'read_result'.
-    (* always_ready *)
-    method Action read(RegId rs1, RegId rs2);
-
-    // Last values read from GPRs.
-    (* always_ready *)
-    method Tuple2#(Word, Word) read_result;
-
-    // Sets register 'index' to 'value'.
-    (* always_ready *)
-    method Action write(RegId index, Word value);
-endinterface
-
-// BRAM-based register file implementation.
-(* synthesize *)
-module mkRegFile (RegFile);
-    BRAM_DUAL_PORT#(RegId, Word) rf0 <- mkBRAMCore2(valueof(RegCount), False);
-    BRAM_DUAL_PORT#(RegId, Word) rf1 <- mkBRAMCore2(valueof(RegCount), False);
-
-    method Action read(RegId rs1, RegId rs2);
-        rf0.a.put(False, rs1, ?);
-        rf1.a.put(False, rs2, ?);
-    endmethod
-
-    method Action write(RegId index, Word value);
-        if (index != 0) begin
-            rf0.b.put(True, index, value);
-            rf1.b.put(True, index, value);
-        end
-    endmethod
-
-    method Tuple2#(Word, Word) read_result = tuple2(rf0.a.read, rf1.a.read);
-endmodule
-
-///////////////////////////////////////////////////////////////////////////////
 // The Tangy5 CPU Core.
 
 // Tangy5 can be customized in terms of its implemented address bus width. The
@@ -118,7 +68,7 @@ provisos (
     Reg#(Bit#(addr_width)) pc_1 <- mkRegU;
 
     // General purpose registers.
-    RegFile regfile <- mkRegFile;
+    RegFile2 regfile <- mkRegFile2;
 
     ///////////////////////////////////////////////////////////////////////////
     // Internal buses and combinational circuits.
