@@ -73,7 +73,10 @@ interface DinkyBus#(numeric type addr_width);
     // a transaction. On read accesses (where write is False) 'data' can be
     // anything.
     (* always_ready *)
-    method Action issue(Bit#(addr_width) address, Bool write, Word data);
+    method Action issue(
+        Bit#(addr_width) address,
+        Bit#(4) write,
+        Word data);
 
     // Memory data return from bus.
     (* always_ready *)

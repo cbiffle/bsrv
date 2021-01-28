@@ -100,7 +100,7 @@ provisos (
     // instruction fetch (which is most of them).
     function Action fetch_next_instruction(Bit#(addr_width) next_pc);
         return action
-            bus.issue(next_pc, False, ?);
+            bus.issue(next_pc, 4'b0000, ?);
             pc <= next_pc;
             state <= onehot_state(RegState);
         endaction;
@@ -201,7 +201,7 @@ provisos (
                     'b010: begin // LW
                         let byte_ea = x1 + imm_i;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
-                        bus.issue(truncate(word_ea), False, ?);
+                        bus.issue(truncate(word_ea), 4'b0000, ?);
                         loading = True;
                     end
                     default: halting = True;
@@ -213,7 +213,7 @@ provisos (
                     'b010: begin // SW
                         let byte_ea = x1 + imm_s;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
-                        bus.issue(truncate(word_ea), True, x2);
+                        bus.issue(truncate(word_ea), 4'b1111, x2);
                         storing = True;
                     end
                     default: halting = True;

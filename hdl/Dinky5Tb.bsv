@@ -43,7 +43,7 @@ module mkTb ();
         return seq
             par
                 action
-                    if (delayed_issue matches tagged Valid {.a, False, .*})
+                    if (delayed_issue matches tagged Valid {.a, 0, .*})
                         dynamicAssert(a == pc, "fetch of wrong address");
                     else dynamicAssert(False, "expected fetch did not happen");
                 endaction
@@ -79,7 +79,7 @@ module mkTb ();
         return seq
             insn_cycle_exec_check(pc, insn, seq
                 action
-                    if (issue_wire.wget matches tagged Valid {.a, False, .*}) 
+                    if (issue_wire.wget matches tagged Valid {.a, 0, .*}) 
                         dynamicAssert(a == ea, "load issued to wrong address");
                     else dynamicAssert(False, "load not issued");
                 endaction

@@ -17,7 +17,7 @@ endinterface
 
 (* synthesize *)
 module mkDinky5Soc (Dinky5Soc);
-    BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1Load(256, False, "../hdl/examples/demoprog.readmemb", True);
+    BRAM_PORT_BE#(Bit#(8), Word, 4) ram <- mkBRAMCore1BELoad(256, False, "../hdl/examples/demoprog.readmemb", True);
 
     Dinky5#(8) core <- mkDinky5(interface DinkyBus;
         method issue(address, write, data) = ram.put(write, address, data);

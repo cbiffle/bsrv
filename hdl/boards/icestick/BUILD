@@ -22,7 +22,7 @@ yosys_design('corny',
     sources = [
         ':corny_example#mkCorny',
         '../../support/BRAM2Load.v',
-        '../../support/BRAM1Load.v',
+        '../../support/BRAM1BELoad.v',
     ],
     deps = [
         ':corny_example',
@@ -113,7 +113,7 @@ yosys_design('dinky',
     sources = [
         ':dinky_example#mkDinky',
         '../../support/BRAM2Load.v',
-        '../../support/BRAM1Load.v',
+        '../../support/BRAM1BELoad.v',
     ],
     deps = [
         ':dinky_example',
@@ -144,7 +144,7 @@ yosys_design('tangy',
     sources = [
         ':tangy_example#mkTangy',
         '../../support/BRAM2Load.v',
-        '../../support/BRAM1.v',
+        '../../support/BRAM1BELoad.v',
     ],
     deps = [
         ':tangy_example',

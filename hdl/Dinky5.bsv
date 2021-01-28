@@ -121,7 +121,7 @@ provisos (
     // instruction fetch (which is most of them).
     function Action fetch_next_instruction(Bit#(addr_width) next_pc);
         return action
-            bus.issue(next_pc, False, 0);
+            bus.issue(next_pc, 4'b0000, 0);
             pc <= next_pc;
             state <= onehot_state(Reg2State);
         endaction;
@@ -218,7 +218,7 @@ provisos (
             'b0000011: begin
                 case (inst_funct3) matches
                     'b010: begin // LW
-                        bus.issue(crop_addr(x1 + imm_i), False, 0);
+                        bus.issue(crop_addr(x1 + imm_i), 4'b0000, 0);
                         loading = True;
                     end
                     default: halting = True;
@@ -228,7 +228,7 @@ provisos (
             'b0100011: begin
                 case (inst_funct3) matches
                     'b010: begin // SW
-                        bus.issue(crop_addr(x1 + imm_s), True, x2);
+                        bus.issue(crop_addr(x1 + imm_s), 4'b1111, x2);
                         storing = True;
                     end
                     default: halting = True;

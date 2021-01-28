@@ -96,7 +96,7 @@ provisos (
     // instruction fetch (which is most of them).
     function Action fetch_next_instruction(Bit#(addr_width) next_pc);
         return action
-            bus.issue(next_pc, False, ?);
+            bus.issue(next_pc, 4'b0000, ?);
             pc <= next_pc;
             state <= RegState;
         endaction;
@@ -168,14 +168,14 @@ provisos (
                 case (fields.funct3) matches
                     'b?00: begin // LB / LBU
                         Word ea = x1 + imm_i;
-                        bus.issue(crop_addr(ea), False, ?);
+                        bus.issue(crop_addr(ea), 4'b0000, ?);
                         load_lsbs = ea[1:0];
                         loading = True;
                     end
                     'b?01: begin // LH / LHU
                         Word ea = x1 + imm_i;
                         if (is_aligned(ea, 1)) begin
-                            bus.issue(crop_addr(ea), False, ?);
+                            bus.issue(crop_addr(ea), 4'b0000, ?);
                             load_lsbs = ea[1:0];
                             loading = True;
                         end else halting = True;
@@ -183,7 +183,7 @@ provisos (
                     'b010: begin // LW
                         Word ea = x1 + imm_i;
                         if (is_aligned(ea, 2)) begin
-                            bus.issue(crop_addr(ea), False, ?);
+                            bus.issue(crop_addr(ea), 4'b0000, ?);
                             loading = True;
                         end else halting = True;
                     end
@@ -194,7 +194,7 @@ provisos (
             'b0100011: begin
                 case (fields.funct3) matches
                     'b010: begin // SW
-                        bus.issue(crop_addr(x1 + imm_s), True, x2);
+                        bus.issue(crop_addr(x1 + imm_s), 4'b1111, x2);
                         storing = True;
                     end
                     default: halting = True;

@@ -17,7 +17,7 @@ endinterface
 
 (* synthesize *)
 module mkTangy5Soc (Tangy5Soc);
-    BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1(256, False);
+    BRAM_PORT_BE#(Bit#(8), Word, 4) ram <- mkBRAMCore1BELoad(256, False, "../hdl/examples/demoprog.readmemb", True);
 
     Tangy5#(8) core <- mkTangy5(interface DinkyBus;
         method issue(a, w, d) = ram.put(w, a, d);
