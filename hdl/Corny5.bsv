@@ -11,6 +11,7 @@
 package Corny5;
 
 import Common::*;
+import Rvfi::*;
 
 ///////////////////////////////////////////////////////////////////////////////
 // The Corny5 CPU Core.
@@ -24,10 +25,6 @@ interface Corny5#(numeric type addr_width);
     // Currently latched instruction, for debugging.
     (* always_ready *)
     method Word core_inst;
-
-    // Register file writes.
-    (* always_ready *)
-    method Maybe#(Tuple2#(RegId, Word)) rf_write_snoop;
 endinterface
 
 // Execution states of the CPU.
@@ -39,7 +36,10 @@ typedef enum {
     HaltState       // Something has gone wrong.
 } State deriving (Bits, FShow, Eq);
 
-module mkCorny5#(DinkyBus#(addr_width) bus) (Corny5#(addr_width))
+module mkCorny5#(
+    DinkyBus#(addr_width) bus,
+    RvfiEmit#(32, 32) rvfi
+) (Corny5#(addr_width))
 provisos (
     // XLEN is >= 2
     Add#(xlen_m2, 2, XLEN),
@@ -54,6 +54,8 @@ provisos (
     // Address of current instruction. Note that this is a word address, not a
     // byte address, so it is missing its two LSBs.
     Reg#(Bit#(addr_width)) pc <- mkReg(0);
+    // Copy of PC for test, should be optimized out in synth
+    Reg#(Bit#(addr_width)) last_pc <- mkRegU;
     // Latched instruction being executed -- only valid in states past
     // RegState!
     Reg#(Word) inst <- mkRegU;
@@ -116,7 +118,8 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule execute (state matches ExecuteState);
-        let next_pc = pc + 1; // we will MUTATE this for jumps!
+        last_pc <= pc;
+        Bit#(addr_width) next_pc = pc + 1; // we will MUTATE this for jumps!
 
         let {x1, x2} = regfile.read_result;
 
@@ -124,19 +127,20 @@ provisos (
         let halting = False;
         let loading = False;
         let storing = False;
+        Maybe#(Tuple2#(RegId, Word)) regwrite = tagged Invalid;
         case (fields.opcode) matches
             // LUI
-            'b0110111: regfile.write(fields.rd, imm_u);
+            'b0110111: regwrite = tagged Valid tuple2(fields.rd, imm_u);
             // AUIPC
-            'b0010111: regfile.write(fields.rd, extend(pc00) + imm_u);
+            'b0010111: regwrite = tagged Valid tuple2(fields.rd, extend(pc00) + imm_u);
             // JAL
             'b1101111: begin
-                regfile.write(fields.rd, extend({pc + 1, 2'b00}));
+                regwrite = tagged Valid tuple2(fields.rd, extend({pc + 1, 2'b00}));
                 next_pc = truncateLSB(pc00 + truncate(imm_j));
             end
             // JALR
             'b1100111: begin
-                regfile.write(fields.rd, extend({pc + 1, 2'b00}));
+                regwrite = tagged Valid tuple2(fields.rd, extend({pc + 1, 2'b00}));
                 next_pc = crop_addr(x1 + imm_i);
             end
             // Bxx
@@ -200,10 +204,32 @@ provisos (
                     'b110: return x1 | rhs; // ORI / OR
                     'b111: return x1 & rhs; // ANDI / AND
                 endcase;
-                regfile.write(fields.rd, alu_result);
+                regwrite = tagged Valid tuple2(fields.rd, alu_result);
             end
             default: halting = True;
         endcase
+
+        if (regwrite matches tagged Valid {.rd, .x})
+            regfile.write(rd, x);
+
+        if (!loading) rvfi.retire(RvfiRetire
+            { insn: inst
+            , trap: False
+            , halt: halting
+            , intr: False
+            , mode: MMode
+            , ixl: 0
+            , rs1: tuple2(fields.rs1, x1)
+            , rs2: tuple2(fields.rs2, x2)
+            , rd: fromMaybe(tuple2(0, ?), regwrite)
+            , pc_before: extend(pc00)
+            , pc_after: extend({next_pc, 2'b00})
+            , mem_addr: x1 + imm_s
+            , mem_wmask: storing ? -1 : 0
+            , mem_wdata: x2
+            , mem_rmask: 0
+            , mem_rdata: ?
+            });
 
         if (halting) state <= HaltState;
         else if (loading) begin
@@ -212,11 +238,33 @@ provisos (
         end else if (storing) begin
             pc <= next_pc;
             state <= JustFetchState;
-        end else fetch_next_instruction(next_pc);
+        end else begin
+            fetch_next_instruction(next_pc);
+        end
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule finish_load (state matches LoadState);
+        let {x1, x2} = regfile.read_result;
+        rvfi.retire(RvfiRetire
+            { insn: inst
+            , trap: False
+            , halt: False
+            , intr: False
+            , mode: MMode
+            , ixl: 0
+            , rs1: tuple2(fields.rs1, x1)
+            , rs2: tuple2(fields.rs2, x2)
+            , rd: tuple2(fields.rd, bus.response)
+            , pc_before: extend({last_pc, 2'b00})
+            , pc_after: extend({pc, 2'b00})
+            , mem_addr: x1 + imm_i
+            , mem_wmask: 0
+            , mem_wdata: x2 // whatevs
+            , mem_rmask: 'b1111
+            , mem_rdata: bus.response
+            });
+
         regfile.write(fields.rd, bus.response);
         fetch_next_instruction(pc);
     endrule
@@ -227,9 +275,6 @@ provisos (
     method State core_state = state;
 
     method Word core_inst = inst;
-
-    method rf_write_snoop = regfile.write_snoop;
-
 endmodule
 
 endpackage

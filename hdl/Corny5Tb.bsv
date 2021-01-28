@@ -6,6 +6,7 @@ import StmtFSM::*;
 
 import Common::*;
 import TestUtil::*;
+import Rvfi::*;
 import Corny5::*;
 
 (* synthesize *)
@@ -23,10 +24,14 @@ module mkTb ();
         delayed_issue <= issue_wire.wget;
     endrule
 
+    let rvfi <- mkRWire;
+
     Reg#(int) cycle <- mkReg(0);
     Reg#(Bool) test_complete <- mkReg(False);
 
-    Corny5#(14) uut <- mkCorny5(bus);
+    Corny5#(14) uut <- mkCorny5(bus, interface RvfiEmit;
+        method retire(record) = rvfi.wset(record);
+    endinterface);
 
     function Stmt insn_cycle(
         Bit#(14) pc,
@@ -54,18 +59,24 @@ module mkTb ();
 
     function Action check_rf_write(RegId r, Word value);
         action
-            if (uut.rf_write_snoop matches tagged Valid {.i, .x}) begin
-                $display("RF WRITE r%0d <= %0h", i, x);
-                dynamicAssert(i == r, "value written to wrong register");
-                dynamicAssert(x == value, "wrong value written to regfile");
+            if (rvfi.wget matches tagged Valid .record
+                    &&& record matches tagged RvfiRetire { rd: .rd }
+                    &&& rd matches {.a, .d}
+                    &&& a != 0) begin
+                $display("RF WRITE r%0d <= %0h", a, d);
+                dynamicAssert(a == r, "value written to wrong register");
+                dynamicAssert(d == value, "wrong value written to regfile");
             end else dynamicAssert(False, "expected RF write did not occur");
         endaction
     endfunction
 
     function Action rf_not_written;
         action
-            if (uut.rf_write_snoop matches tagged Valid {.i, .x}) begin
-                $display("UNEXPECTED WRITE r%0d <= %0h", i, x);
+            if (rvfi.wget matches tagged Valid .record
+                    &&& record matches tagged RvfiRetire { rd: .rd }
+                    &&& rd matches {.a, .d}
+                    &&& a != 0) begin
+                $display("UNEXPECTED WRITE r%0d <= %0h", a, d);
                 dynamicAssert(False, "RF written unexpectedly");
             end
         endaction
@@ -171,19 +182,10 @@ module mkTb ();
     rule show (!test_complete);
         cycle <= cycle + 1;
         $display("--- %0d", cycle);
-        $display("state = ", fshow(uut.core_state));
-        $display("inst = ", fshow(uut.core_inst));
+        if (rvfi.wget matches tagged Valid .record)
+            $display(cycle, " RVFI ", fshow(record));
     endrule
 
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule show_issue (!test_complete);
-        $display("issue = ", fshow(issue_wire.wget));
-    endrule
-
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule show_rf_writes (uut.rf_write_snoop matches tagged Valid {.i, .x});
-        $display("RF WRITE r%0d <= %0h", i, x);
-    endrule
 endmodule
 
 endpackage

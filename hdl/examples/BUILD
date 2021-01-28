@@ -11,6 +11,7 @@ bluespec_library('Corny5Soc',
     ],
     deps = [
         '//hdl:Common',
+        '//hdl:Rvfi',
         '//hdl:Corny5',
     ],
 )

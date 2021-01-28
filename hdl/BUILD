@@ -1,6 +1,7 @@
 # vim:syntax=python:
 
 bluespec_library('Common', sources = ['Common.bsv'])
+bluespec_library('Rvfi', sources = ['Rvfi.bsv'])
 
 bluespec_library('TestUtil',
     sources = ['TestUtil.bsv'],
@@ -11,7 +12,10 @@ bluespec_library('TestUtil',
 def basic_core(name):
     bluespec_library(name,
         sources = [name + '.bsv'],
-        deps = [':Common'],
+        deps = [
+            ':Common',
+            ':Rvfi',
+        ],
     )
 
     bluespec_sim(name + 'Tb',
@@ -19,6 +23,7 @@ def basic_core(name):
         modules = ['mkTb'],
         deps = [
             ':Common',
+            ':Rvfi',
             ':TestUtil',
             ':' + name,
         ],

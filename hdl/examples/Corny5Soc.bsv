@@ -9,6 +9,7 @@ import BRAMCore::*;
 import Vector::*;
 
 import Common::*;
+import Rvfi::*;
 import Corny5::*;
 
 interface Corny5Soc;
@@ -22,7 +23,7 @@ module mkCorny5Soc (Corny5Soc);
     Corny5#(8) core <- mkCorny5(interface DinkyBus;
         method issue(a, w, d) = ram.put(w, a, d);
         method response = ram.read;
-    endinterface);
+    endinterface, noRvfi);
 
     method Bit#(5) led = extend(pack(core.core_state));
 endmodule
