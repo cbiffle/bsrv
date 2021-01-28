@@ -85,19 +85,24 @@ module mkTb ();
     function Stmt insn_cycle_load(
         Bit#(14) pc,
         Word insn,
-        Bit#(14) ea,
-        Word loaded
+        Bit#(16) ea,
+        Word loaded,
+        Word written
     );
         return seq
             insn_cycle(pc, insn, action
                 if (issue_wire.wget matches tagged Valid {.a, False, .*})
-                    dynamicAssert(a == ea, "loaded wrong address");
+                    dynamicAssert(a == ea[15:2], "loaded wrong address");
                 else dynamicAssert(False, "did not load");
             endaction);
             par
-                dynamicAssert(uut.core_state == LoadState, "not in load state");
+                action
+                    if (uut.core_state matches tagged LoadState {addr_lsbs: .lsbs})
+                        dynamicAssert(lsbs == ea[1:0], "got LSBS wrong");
+                    else dynamicAssert(False, "not in load state");
+                endaction
                 response_wire <= loaded;
-                check_rf_write(insn[11:7], loaded);
+                check_rf_write(insn[11:7], written);
             endpar
         endseq;
     endfunction
@@ -135,7 +140,7 @@ module mkTb ();
             check_rf_write(2, 5 * 4));
         insn_cycle(7, rv32_b(CondEQ, 2, 2, 16),
             rf_not_written);
-        insn_cycle_load(11, rv32_lw(3, 2, 'h404), (20 + 'h404) >> 2, 'hBAADF00D);
+        insn_cycle_load(11, rv32_lw(3, 2, 'h404), (20 + 'h404), 'hBAADF00D, 'hBAADF00D);
         insn_cycle_store(12, rv32_sw(3, 2, 'h404), (20 + 'h404) >> 2, 'hBAADF00D);
 
         insn_cycle(13, rv32_addi(2, 3, 42), check_rf_write(2, 'hBAADF00D + 42));
@@ -173,6 +178,12 @@ module mkTb ();
         insn_cycle(38, rv32_sll(3, 1, 2), check_rf_write(3, lhs << rhs[4:0]));
         insn_cycle(39, rv32_srl(3, 1, 2), check_rf_write(3, lhs >> rhs[4:0]));
         insn_cycle(40, rv32_sra(3, 1, 2), check_rf_write(3, {-1, lhs[31:7]}));
+
+        insn_cycle_load(41, rv32_lb(3, 2, 'h404), (rhs + 'h404)[15:0], 'hBAADF00D, 'hFFFFFFBA);
+        insn_cycle_load(42, rv32_lbu(3, 2, 'h404), (rhs + 'h404)[15:0], 'hBAADF00D, 'hBA);
+        insn_cycle(43, rv32_andi(2, 2, 'hFFE), noAction); // clear LSB
+        insn_cycle_load(44, rv32_lh(3, 2, 'h404), (rhs + 'h403)[15:0], 'hBAADF00D, 'hFFFFBAAD);
+        insn_cycle_load(45, rv32_lhu(3, 2, 'h404), (rhs + 'h403)[15:0], 'hBAADF00D, 'hBAAD);
 
         test_complete <= True;
         $display("PASS");

@@ -189,4 +189,9 @@ module mkRegFile2 (RegFile2);
     method write_snoop = ws.wget;
 endmodule
 
+function Bool is_aligned(Bit#(n) address, int granule);
+    Bit#(n) mask = (1 << granule) - 1;
+    return (address & mask) == 0;
+endfunction
+
 endpackage

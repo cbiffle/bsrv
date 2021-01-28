@@ -24,6 +24,14 @@ function Word rv32_b(BranchCondition cc, RegId rs1, RegId rs2, Bit#(13) d) =
     {d[12], d[10:5], rs2, rs1, pack(cc), d[4:1], d[11], 7'b1100011};
 function Word rv32_lw(RegId rd, RegId rs1, Bit#(12) d) =
     {d, rs1, 3'b010, rd, 7'b0000011};
+function Word rv32_lb(RegId rd, RegId rs1, Bit#(12) d) =
+    {d, rs1, 3'b000, rd, 7'b0000011};
+function Word rv32_lbu(RegId rd, RegId rs1, Bit#(12) d) =
+    {d, rs1, 3'b100, rd, 7'b0000011};
+function Word rv32_lh(RegId rd, RegId rs1, Bit#(12) d) =
+    {d, rs1, 3'b001, rd, 7'b0000011};
+function Word rv32_lhu(RegId rd, RegId rs1, Bit#(12) d) =
+    {d, rs1, 3'b101, rd, 7'b0000011};
 function Word rv32_sw(RegId rs2, RegId rs1, Bit#(12) d) =
     {d[11:5], rs2, rs1, 3'b010, d[4:0], 7'b0100011};
 

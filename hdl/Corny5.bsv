@@ -28,12 +28,14 @@ interface Corny5#(numeric type addr_width);
 endinterface
 
 // Execution states of the CPU.
-typedef enum {
-    JustFetchState, // Reset, or second cycle of store.
-    RegState,       // Reading instruction, selecting registers.
-    ExecuteState,   // Executing first instruction cycle.
-    LoadState,      // Second cycle for loads.
-    HaltState       // Something has gone wrong.
+typedef union tagged {
+    void JustFetchState; // Reset, or second cycle of store.
+    void RegState;       // Reading instruction, selecting registers.
+    void ExecuteState;   // Executing first instruction cycle.
+    struct {
+        Bit#(2) addr_lsbs;
+    } LoadState;         // Second cycle for loads.
+    void HaltState;      // Something has gone wrong.
 } State deriving (Bits, FShow, Eq);
 
 module mkCorny5#(
@@ -127,6 +129,7 @@ provisos (
         let halting = False;
         let loading = False;
         let storing = False;
+        let load_lsbs = 0;
         Maybe#(Tuple2#(RegId, Word)) regwrite = tagged Invalid;
         case (fields.opcode) matches
             // LUI
@@ -163,9 +166,26 @@ provisos (
             // Lx
             'b0000011: begin
                 case (fields.funct3) matches
-                    'b010: begin // LW
-                        bus.issue(crop_addr(x1 + imm_i), False, ?);
+                    'b?00: begin // LB / LBU
+                        Word ea = x1 + imm_i;
+                        bus.issue(crop_addr(ea), False, ?);
+                        load_lsbs = ea[1:0];
                         loading = True;
+                    end
+                    'b?01: begin // LH / LHU
+                        Word ea = x1 + imm_i;
+                        if (is_aligned(ea, 1)) begin
+                            bus.issue(crop_addr(ea), False, ?);
+                            load_lsbs = ea[1:0];
+                            loading = True;
+                        end else halting = True;
+                    end
+                    'b010: begin // LW
+                        Word ea = x1 + imm_i;
+                        if (is_aligned(ea, 2)) begin
+                            bus.issue(crop_addr(ea), False, ?);
+                            loading = True;
+                        end else halting = True;
                     end
                     default: halting = True;
                 endcase
@@ -234,7 +254,7 @@ provisos (
         if (halting) state <= HaltState;
         else if (loading) begin
             pc <= next_pc;
-            state <= LoadState;
+            state <= tagged LoadState { addr_lsbs: load_lsbs };
         end else if (storing) begin
             pc <= next_pc;
             state <= JustFetchState;
@@ -244,7 +264,39 @@ provisos (
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule finish_load (state matches LoadState);
+    rule finish_load (state matches tagged LoadState { addr_lsbs: .lsbs });
+        let size = fields.funct3;
+        let rmask = case (size) matches
+            'b?00: 1 << lsbs;
+            'b?01: 'b11 << lsbs;
+            'b010: 'b1111;
+        endcase;
+
+        let loaded_value = case (size) matches
+            'b?00: begin
+                let uns = size[2] != 0;
+                let byteval = case (lsbs) matches
+                    'b00: bus.response[7:0];
+                    'b01: bus.response[15:8];
+                    'b10: bus.response[23:16];
+                    'b11: bus.response[31:24];
+                endcase;
+                return uns ? extend(byteval) : signExtend(byteval);
+            end
+            'b?01: begin
+                let uns = size[2] != 0;
+                let halfval = case (lsbs) matches
+                    'b00: bus.response[15:0];
+                    'b10: bus.response[31:16];
+                endcase;
+                return uns ? extend(halfval) : signExtend(halfval);
+            end
+            'b010: bus.response;
+        endcase;
+
+        regfile.write(fields.rd, loaded_value);
+        fetch_next_instruction(pc);
+
         let {x1, x2} = regfile.read_result;
         rvfi.retire(RvfiRetire
             { insn: inst
@@ -255,18 +307,16 @@ provisos (
             , ixl: 0
             , rs1: tuple2(fields.rs1, x1)
             , rs2: tuple2(fields.rs2, x2)
-            , rd: tuple2(fields.rd, bus.response)
+            , rd: tuple2(fields.rd, loaded_value)
             , pc_before: extend({last_pc, 2'b00})
             , pc_after: extend({pc, 2'b00})
-            , mem_addr: x1 + imm_i
+            , mem_addr: (x1 + imm_i) & ~'b11
             , mem_wmask: 0
             , mem_wdata: x2 // whatevs
-            , mem_rmask: 'b1111
+            , mem_rmask: rmask
             , mem_rdata: bus.response
             });
 
-        regfile.write(fields.rd, bus.response);
-        fetch_next_instruction(pc);
     endrule
 
     ///////////////////////////////////////////////////////////////////////////
