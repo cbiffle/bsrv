@@ -20,7 +20,7 @@ endinterface
 
 (* synthesize *)
 module mkTwisty5Soc#(ShifterFlavor shifter_flavor) (Twisty5Soc);
-    BRAM_PORT#(Bit#(8), Word) ram <- mkBRAMCore1Load(256, False,
+    BRAM_PORT_BE#(Bit#(8), Word, 4) ram <- mkBRAMCore1BELoad(256, False,
         "../hdl/examples/twisty.readmemb", True);
 
     let issue_wire <- mkWire;
@@ -28,12 +28,22 @@ module mkTwisty5Soc#(ShifterFlavor shifter_flavor) (Twisty5Soc);
     let outport1 <- mkReg(0);
     let outport2 <- mkReg(0);
 
+    function Action lanewrite(Reg#(Word) r, Vector#(4, Maybe#(Bit#(8))) data);
+        return action
+            r <= {
+                fromMaybe(r[31:24], data[3]),
+                fromMaybe(r[23:16], data[2]),
+                fromMaybe(r[15:8], data[1]),
+                fromMaybe(r[7:0], data[0])
+            };
+        endaction;
+    endfunction
+
     Twisty5#(9) core <- mkTwisty5(shifter_flavor, interface TwistyBus#(9);
-        method Action issue(Bit#(9) address, Maybe#(Word) write_data);
+        method Action issue(address, write_data);
             let {io, addr} = split(address);
-            if (io == 1'b1) begin
-                if (write_data matches tagged Valid .data) outport <= data;
-            end else issue_wire <= tuple2(addr, write_data);
+            if (io == 1'b1) lanewrite(outport, write_data);
+            else issue_wire <= tuple2(addr, write_data);
         endmethod
         method Word response;
             return ram.read;
@@ -43,7 +53,7 @@ module mkTwisty5Soc#(ShifterFlavor shifter_flavor) (Twisty5Soc);
     (* fire_when_enabled *)
     rule drive_ram;
         let {a, wd} = issue_wire;
-        ram.put(isValid(wd), a, fromMaybe(?, wd));
+        ram.put(pack(map(isValid, wd)), a, pack(map(fromMaybe(?), wd)));
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)

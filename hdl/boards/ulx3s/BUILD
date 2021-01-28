@@ -23,7 +23,7 @@ yosys_design('twisty',
     sources = [
         ':twisty_example#mkTwisty',
         '../../support/BRAM2Load.v',
-        '../../support/BRAM1Load.v',
+        '../../support/BRAM1BELoad.v',
         '../../support/MakeReset.v',
         '../../support/SyncReset.v',
         '../../support/ResetInverter.v',
