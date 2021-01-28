@@ -24,6 +24,10 @@ interface Corny5#(numeric type addr_width);
     // Currently latched instruction, for debugging.
     (* always_ready *)
     method Word core_inst;
+
+    // Register file writes.
+    (* always_ready *)
+    method Maybe#(Tuple2#(RegId, Word)) rf_write_snoop;
 endinterface
 
 // Execution states of the CPU.
@@ -68,6 +72,7 @@ provisos (
 
     // Various immediate decodes
     Word imm_i = signExtend(inst[31:20]);
+    Word imm_s = signExtend({inst[31:25], inst[11:7]});
     Word imm_u = {inst[31:12], 0};
     Word imm_j = {
         signExtend(inst[31]), inst[19:12], inst[20], inst[30:21], 1'b0};
@@ -123,7 +128,7 @@ provisos (
             // LUI
             'b0110111: regfile.write(fields.rd, imm_u);
             // AUIPC
-            'b0010111: regfile.write(fields.rd, extend(pc00 + truncate(imm_u)));
+            'b0010111: regfile.write(fields.rd, extend(pc00) + imm_u);
             // JAL
             'b1101111: begin
                 regfile.write(fields.rd, extend({pc + 1, 2'b00}));
@@ -165,7 +170,7 @@ provisos (
             'b0100011: begin
                 case (fields.funct3) matches
                     'b010: begin // SW
-                        bus.issue(crop_addr(x1 + imm_i), True, x2);
+                        bus.issue(crop_addr(x1 + imm_s), True, x2);
                         storing = True;
                     end
                     default: halting = True;
@@ -219,13 +224,11 @@ provisos (
     ///////////////////////////////////////////////////////////////////////////
     // External port connections.
 
-    method State core_state;
-        return state;
-    endmethod
+    method State core_state = state;
 
-    method Word core_inst;
-        return inst;
-    endmethod
+    method Word core_inst = inst;
+
+    method rf_write_snoop = regfile.write_snoop;
 
 endmodule
 

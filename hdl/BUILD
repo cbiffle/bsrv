@@ -2,6 +2,11 @@
 
 bluespec_library('Common', sources = ['Common.bsv'])
 
+bluespec_library('TestUtil',
+    sources = ['TestUtil.bsv'],
+    deps = [':Common'],
+)
+
 # Repeating pattern of targets for each basic core design:
 def basic_core(name):
     bluespec_library(name,
@@ -14,6 +19,7 @@ def basic_core(name):
         modules = ['mkTb'],
         deps = [
             ':Common',
+            ':TestUtil',
             ':' + name,
         ],
     )

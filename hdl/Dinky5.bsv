@@ -107,6 +107,7 @@ provisos (
 
     // Various immediate decodes
     Word imm_i = signExtend(inst[31:20]);
+    Word imm_s = signExtend({inst[31:25], inst[11:7]});
     Word imm_u = {inst[31:12], 0};
     Word imm_j = {
         signExtend(inst[31]), inst[19:12], inst[20], inst[30:21], 1'b0};
@@ -227,7 +228,7 @@ provisos (
             'b0100011: begin
                 case (inst_funct3) matches
                     'b010: begin // SW
-                        bus.issue(crop_addr(x1 + imm_i), True, x2);
+                        bus.issue(crop_addr(x1 + imm_s), True, x2);
                         storing = True;
                     end
                     default: halting = True;

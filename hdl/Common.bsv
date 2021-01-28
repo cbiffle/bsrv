@@ -154,6 +154,11 @@ interface RegFile2;
     // Sets register 'index' to 'value'.
     (* always_ready *)
     method Action write(RegId index, Word value);
+
+    // Notifies you of writes to the register file. This is intended for
+    // verification but is synthesizable if you have an odd need.
+    (* always_ready *)
+    method Maybe#(Tuple2#(RegId, Word)) write_snoop;
 endinterface
 
 // BRAM-based register file implementation.
@@ -164,6 +169,8 @@ module mkRegFile2 (RegFile2);
     BRAM_DUAL_PORT#(RegId, Word) rf1 <- mkBRAMCore2Load(
         valueof(RegCount), False, "../hdl/zero-register-set.readmemb", True);
 
+    let ws <- mkRWire;
+
     method Action read(RegId rs1, RegId rs2);
         rf0.a.put(False, rs1, ?);
         rf1.a.put(False, rs2, ?);
@@ -173,10 +180,13 @@ module mkRegFile2 (RegFile2);
         if (index != 0) begin
             rf0.b.put(True, index, value);
             rf1.b.put(True, index, value);
+            ws.wset(tuple2(index, value));
         end
     endmethod
 
     method Tuple2#(Word, Word) read_result = tuple2(rf0.a.read, rf1.a.read);
+
+    method write_snoop = ws.wget;
 endmodule
 
 endpackage

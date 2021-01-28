@@ -270,6 +270,7 @@ provisos (
             let shifter_out = truncate(pack(shift_ext >> s.rhs[4:0]));
 
             Word imm_i = signExtend(inst[31:20]);
+            Word imm_s = signExtend({inst[31:25], inst[11:7]});
             Word imm_u = {inst[31:12], 0};
             Word imm_j = {
                 signExtend(inst[31]), inst[19:12], inst[20], inst[30:21], 1'b0};
@@ -289,7 +290,7 @@ provisos (
                 // LUI
                 'b0110111: rf_write = tagged Valid tuple2(fields.rd, imm_u);
                 // AUIPC
-                'b0010111: rf_write = tagged Valid tuple2(fields.rd, extend(pc00 + truncate(imm_u)));
+                'b0010111: rf_write = tagged Valid tuple2(fields.rd, extend(pc00) + imm_u);
                 // JAL
                 'b1101111: begin
                     next_pc = truncateLSB(pc00 + truncate(imm_j));
@@ -328,7 +329,7 @@ provisos (
                     case (fields.funct3) matches
                         'b010: begin // SW
                             next_state = tagged Base tagged ResetState;
-                            other_addr = tagged Valid crop_addr(s.x1 + imm_i);
+                            other_addr = tagged Valid crop_addr(s.x1 + imm_s);
                             mem_write_data = tagged Valid s.x2;
                         end
                         default: next_state = tagged Base tagged HaltState;

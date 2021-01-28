@@ -86,6 +86,7 @@ provisos (
 
     // Various immediate decodes
     Word imm_i = signExtend(inst[31:20]);
+    Word imm_s = signExtend({inst[31:25], inst[11:7]});
     Word imm_u = {inst[31:12], 0};
     Word imm_j = {
         signExtend(inst[31]), inst[19:12], inst[20], inst[30:21], 1'b0};
@@ -167,7 +168,7 @@ provisos (
             end
             // AUIPC
             'b0010111: begin
-                regfile.write(inst_rd, extend(pc00 + truncate(imm_u)));
+                regfile.write(inst_rd, extend(pc00) + imm_u);
             end
             // JAL
             'b1101111: begin
@@ -210,7 +211,7 @@ provisos (
             'b0100011: begin
                 case (inst_funct3) matches
                     'b010: begin // SW
-                        let byte_ea = x1 + imm_i;
+                        let byte_ea = x1 + imm_s;
                         Bit#(xlen_m2) word_ea = truncateLSB(byte_ea);
                         bus.issue(truncate(word_ea), True, x2);
                         storing = True;
