@@ -31,9 +31,9 @@ about the results. Numbers may be out of date.
 | Corny5 | hx1k | barrel | 1182 | 53.74 | ~27 | 1 |
 | Dinky5 | hx1k | barrel | 729 | 60.44 | ~20 | 1 |
 | Tangy5 | hx1k | barrel | 836 | 50.95 | ~25 | 1 |
-| Twisty5 | hx1k | serial | 888 | 75.53 | ~18 | 4 |
-| Twisty5 | hx1k | leap | 927 | 80.98 | ~20 | 4 |
-| Twisty5 | hx1k | barrel| 1049 | 81.49 | ~20 | 4 |
+| Twisty5 | hx1k | serial | 892 | 78.51 | ~19 | 4 |
+| Twisty5 | hx1k | leap | 959 | 83.64 | ~20 | 4 |
+| Twisty5 | hx1k | barrel| 1055 | 77.20 | ~20 | 4 |
 
 # License / copyright
 

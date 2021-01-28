@@ -316,24 +316,28 @@ provisos (
                 end
                 // Lx
                 'b0000011: begin
-                    case (fields.funct3) matches
-                        'b010: begin // LW
-                            next_state = tagged Base tagged LoadState fields.rd;
-                            other_addr = tagged Valid crop_addr(s.x1 + imm_i);
-                        end
-                        default: next_state = tagged Base tagged HaltState;
-                    endcase
+                    let ea = s.x1 + imm_i;
+                    let aligned = case (fields.funct3) matches
+                        'b010: (ea[1:0] == 0);
+                        default: False;
+                    endcase;
+
+                    other_addr = tagged Valid crop_addr(ea);
+                    if (aligned) next_state = tagged Base tagged LoadState fields.rd;
+                    else next_state = tagged Base tagged HaltState;
                 end
                 // Sx
                 'b0100011: begin
-                    case (fields.funct3) matches
-                        'b010: begin // SW
-                            next_state = tagged Base tagged ResetState;
-                            other_addr = tagged Valid crop_addr(s.x1 + imm_s);
-                            mem_write_data = tagged Valid s.x2;
-                        end
-                        default: next_state = tagged Base tagged HaltState;
-                    endcase
+                    let ea = s.x1 + imm_s;
+                    let aligned = case (fields.funct3) matches
+                        'b010: (ea[1:0] == 0);
+                        default: False;
+                    endcase;
+                    other_addr = tagged Valid crop_addr(ea);
+                    if (aligned) begin
+                        next_state = tagged Base tagged ResetState;
+                        mem_write_data = tagged Valid s.x2;
+                    end else next_state = tagged Base tagged HaltState;
                 end
                 // ALU reg/immediate
                 'b0?10011: begin
