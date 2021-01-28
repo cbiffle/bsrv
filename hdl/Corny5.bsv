@@ -165,15 +165,14 @@ provisos (
             end
             // Lx
             'b0000011: begin
+                Word ea = x1 + imm_i;
                 case (fields.funct3) matches
                     'b?00: begin // LB / LBU
-                        Word ea = x1 + imm_i;
                         bus.issue(crop_addr(ea), 4'b0000, ?);
                         load_lsbs = ea[1:0];
                         loading = True;
                     end
                     'b?01: begin // LH / LHU
-                        Word ea = x1 + imm_i;
                         if (is_aligned(ea, 1)) begin
                             bus.issue(crop_addr(ea), 4'b0000, ?);
                             load_lsbs = ea[1:0];
@@ -181,7 +180,6 @@ provisos (
                         end else halting = True;
                     end
                     'b010: begin // LW
-                        Word ea = x1 + imm_i;
                         if (is_aligned(ea, 2)) begin
                             bus.issue(crop_addr(ea), 4'b0000, ?);
                             loading = True;
@@ -192,10 +190,26 @@ provisos (
             end
             // Sx
             'b0100011: begin
+                let ea = x1 + imm_s;
+                let lsbs = ea[1:0];
                 case (fields.funct3) matches
-                    'b010: begin // SW
-                        bus.issue(crop_addr(x1 + imm_s), 4'b1111, x2);
+                    'b000: begin // SB
+                        bus.issue(crop_addr(ea), 1 << lsbs,
+                            {x2[7:0], x2[7:0], x2[7:0], x2[7:0]});
                         storing = True;
+                    end
+                    'b000: begin // SH
+                        if (is_aligned(ea, 1)) begin
+                            bus.issue(crop_addr(ea), 'b11 << lsbs, 
+                                {x2[15:0], x2[15:0]});
+                            storing = True;
+                        end else halting = True;
+                    end
+                    'b010: begin // SW
+                        if (is_aligned(ea, 2)) begin
+                            bus.issue(crop_addr(x1 + imm_s), 4'b1111, x2);
+                            storing = True;
+                        end else halting = True;
                     end
                     default: halting = True;
                 endcase

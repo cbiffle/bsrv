@@ -110,13 +110,16 @@ module mkTb ();
     function Stmt insn_cycle_store(
         Bit#(14) pc,
         Word insn,
-        Bit#(14) ea,
+        Bit#(16) ea,
+        Bit#(4) mask,
         Word stored
     );
         return seq
             insn_cycle(pc, insn, action
-                if (issue_wire.wget matches tagged Valid {.a, 4'b1111, .d}) begin
-                    dynamicAssert(a == ea, "stored wrong address");
+                if (issue_wire.wget matches tagged Valid {.a, .m, .d}) begin
+                    $display("STORE: a=%0h, m=%0h, d=%0h", a, m, d);
+                    dynamicAssert(m == mask, "stored with wrong mask");
+                    dynamicAssert(a == ea[15:2], "stored wrong address");
                     dynamicAssert(d == stored, "stored wrong value");
                 end else dynamicAssert(False, "did not store");
                 rf_not_written;
@@ -141,7 +144,7 @@ module mkTb ();
         insn_cycle(7, rv32_b(CondEQ, 2, 2, 16),
             rf_not_written);
         insn_cycle_load(11, rv32_lw(3, 2, 'h404), (20 + 'h404), 'hBAADF00D, 'hBAADF00D);
-        insn_cycle_store(12, rv32_sw(3, 2, 'h404), (20 + 'h404) >> 2, 'hBAADF00D);
+        insn_cycle_store(12, rv32_sw(3, 2, 'h404), (20 + 'h404), 'b1111, 'hBAADF00D);
 
         insn_cycle(13, rv32_addi(2, 3, 42), check_rf_write(2, 'hBAADF00D + 42));
 
@@ -184,6 +187,9 @@ module mkTb ();
         insn_cycle(43, rv32_andi(2, 2, 'hFFE), noAction); // clear LSB
         insn_cycle_load(44, rv32_lh(3, 2, 'h404), (rhs + 'h403)[15:0], 'hBAADF00D, 'hFFFFBAAD);
         insn_cycle_load(45, rv32_lhu(3, 2, 'h404), (rhs + 'h403)[15:0], 'hBAADF00D, 'hBAAD);
+
+        insn_cycle_store(46, rv32_sb(3, 2, 'h404), (rhs + 'h403)[15:0], 'b0100, 'hADADADAD);
+        insn_cycle_store(47, rv32_sh(3, 2, 'h404), (rhs + 'h403)[15:0], 'b1100, 'hBAADBAAD);
 
         test_complete <= True;
         $display("PASS");

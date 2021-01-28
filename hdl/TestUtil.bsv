@@ -34,6 +34,10 @@ function Word rv32_lhu(RegId rd, RegId rs1, Bit#(12) d) =
     {d, rs1, 3'b101, rd, 7'b0000011};
 function Word rv32_sw(RegId rs2, RegId rs1, Bit#(12) d) =
     {d[11:5], rs2, rs1, 3'b010, d[4:0], 7'b0100011};
+function Word rv32_sh(RegId rs2, RegId rs1, Bit#(12) d) =
+    {d[11:5], rs2, rs1, 3'b001, d[4:0], 7'b0100011};
+function Word rv32_sb(RegId rs2, RegId rs1, Bit#(12) d) =
+    {d[11:5], rs2, rs1, 3'b000, d[4:0], 7'b0100011};
 
 function Word rv32_alu_imm(Bit#(3) op, RegId rd, RegId rs1, Bit#(12) d) =
     {d[11:0], rs1, op, rd, 7'b0010011};
