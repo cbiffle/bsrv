@@ -87,6 +87,9 @@ provisos (
     Reg#(Bit#(5)) shift_amt <- mkRegU;
     // Shifter state: bit that will be shifted in on right-shift.
     Reg#(bit) shift_fill <- mkRegU;
+    // Record of load effective address LSBs for use in shifting the returned
+    // value into place.
+    Reg#(Bit#(2)) load_lsbs <- mkRegU;
 
     // General purpose registers.
     RegFile1 regfile <- mkRegFile1;
@@ -216,23 +219,46 @@ provisos (
             end
             // Lx
             'b0000011: begin
-                case (inst_funct3) matches
-                    'b010: begin // LW
-                        bus.issue(crop_addr(x1 + imm_i), 4'b0000, 0);
-                        loading = True;
-                    end
-                    default: halting = True;
-                endcase
+                let ea = x1 + imm_i;
+                load_lsbs <= ea[1:0];
+                // We'll go ahead and issue the load even if it's not aligned
+                // correctly, to reduce logic here.
+                bus.issue(crop_addr(ea), 4'b0000, 0);
+                // Misalignment check
+                let aligned = case (inst_funct3) matches
+                    'b010: is_aligned(ea, 2); // LW
+                    'b?00: True; // LB / LBU
+                    'b?01: is_aligned(ea, 1); // LH/LHU
+                    default: False; // 64-bit operation
+                endcase;
+                loading = True;
+                halting = !aligned;
             end
             // Sx
             'b0100011: begin
-                case (inst_funct3) matches
-                    'b010: begin // SW
-                        bus.issue(crop_addr(x1 + imm_s), 4'b1111, x2);
-                        storing = True;
-                    end
-                    default: halting = True;
-                endcase
+                let ea = x1 + imm_s;
+                // The alignment check will serve as our guard against both
+                // unaligned stores, _and_ illegal size encodings. If aligned
+                // is not set, the store will be blunted.
+                let aligned = case (inst_funct3) matches
+                    'b000: True;
+                    'b001: (ea[0] == 0);
+                    'b010: (ea[1:0] == 0);
+                    default: False;
+                endcase;
+                let mask = case (inst_funct3) matches
+                    'b000: 1 << ea[1:0];
+                    'b001: 'b11 << ea[1:0];
+                    'b010: 'b1111;
+                endcase;
+                let val = case (inst_funct3) matches
+                    'b000: {x2[7:0], x2[7:0], x2[7:0], x2[7:0]};
+                    'b001: {x2[15:0], x2[15:0]};
+                    'b010: x2;
+                endcase;
+                bus.issue(crop_addr(ea), aligned ? mask : 0, val);
+                storing = True;
+                halting = !aligned;
             end
             // ALU reg/immediate
             'b0?10011: begin
@@ -307,7 +333,25 @@ provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule finish_load (is_onehot_state(state, LoadState));
-        regfile.write(inst_rd, bus.response);
+        let size = inst_funct3[1:0];
+        let zext = inst_funct3[2] == 1;
+
+        // I am delighted to report that Yosys produces a circuit just as
+        // compact as my handrolled alternative in response to this shift, so
+        // there is no need to complicate things.
+        let shifted = bus.response >> {load_lsbs, 3'b0};
+
+        regfile.write(inst_rd, case (size) matches
+            'b00: begin
+                let b = shifted[7:0];
+                return zext ? extend(b) : signExtend(b);
+            end
+            'b01: begin
+                let h = shifted[15:0];
+                return zext ? extend(h) : signExtend(h);
+            end
+            'b10: bus.response;
+        endcase);
         fetch_next_instruction(pc);
     endrule
 
