@@ -17,28 +17,51 @@
 // You can think of the system as alternating between threads at each clock
 // cycle. Each thread takes 4 system clock cycles to execute most instructions,
 // so at 80MHz system clock each thread runs at 20MIPS. (Load and store
-// instructions take twice as long due to bus contention, and shift
-// instructions take a rather long time to save space.)
+// operations take twice as long due to bus contention.)
+//
+// You can select the shifter implementation at instantiation.
+// - Serial: uses a shift register and moves data by one bit per _thread
+//   cycle,_ meaning one bit per 4 system clocks. This is glacially slow but
+//   very compact. Shifts take up to 33 thread cycles or 132 system cycles.
+// - Leap: also uses a shift register, but with mux paths to move by 8 bits in
+//   addition to 1. Shifts take up to 10 thread / 40 system cycles. Larger than
+//   Serial but not by a lot.
+// - Barrel: full barrel shifter. All shifts complete in 1 cycle. Costs around
+//   150-200 LUTs, i.e. makes the core something like 11% larger.
 
 package Twisty5;
 
 import BRAMCore::*;
+import Connectable::*;
+import GetPut::*;
 import Vector::*;
 
 import Common::*;
 
+///////////////////////////////////////////////////////////////////////////////
+// System parameters and interfaces.
+
+// Number of hardware threads. "Hart" is RISC-V jargon.
 typedef 4 HartCount;
+// Enough bits to distinguish all the harts.
 typedef Bit#(TLog#(HartCount)) HartId;
 
+// Interface that we expect to be implemented by the bus fabric.
 interface TwistyBus#(numeric type addr_width);
+    // Issues a transaction to the bus. If any of the lanes in `write_data` is
+    // `Valid` this is a write, otherwise it's a read.
     (* always_ready *)
     method Action issue(
         Bit#(addr_width) address,
         Vector#(4, Maybe#(Bit#(8))) write_data);
+    // Data from a read request issued on the previous cycle; undefined
+    // otherwise.
     (* always_ready *)
     method Word response;
 endinterface
 
+// Interface exposed by the core. These are mostly debug signals, the core
+// mostly communicates with the outside world through the bus fabric.
 interface Twisty5#(numeric type addr_width);
     (* always_ready *)
     method Bool halted;
@@ -48,111 +71,114 @@ interface Twisty5#(numeric type addr_width);
     method HartState next_hart_state;
 endinterface
 
+// Types of shifter you can request.
+//
+// Notice that this type does not derive Bits. That's because it exists only at
+// compile time. If you ever get an error about this needing a Bits instance,
+// something has gone horribly wrong.
 typedef enum {
     SerialShifter,
     LeapShifter,
     BarrelShifter
 } ShifterFlavor deriving (Eq, FShow);
 
-typedef enum { Left, Right } ShiftDir deriving (Bits, FShow);
+///////////////////////////////////////////////////////////////////////////////
+// Internal state.
 
+// Execution state for a hart. This is divided into Base vs ShiftState because
+// it helps bsc notice that ShiftState is not used when the shifter is a barrel
+// shifter, and eliminate its signals. It doesn't work 100% reliably and merits
+// revisiting later (TODO).
 typedef union tagged {
+    // States for executing instructions.
     BaseHartState Base;
+    // State for executing a serial shift operation.
     struct {
+        // Bit being shifted in, for right shifts only.
         bit fill;
+        // Direction of shift.
         ShiftDir dir;
+        // Bits remaining.
         UInt#(5) amt;
     } ShiftState;
 } HartState deriving (Bits, FShow);
 
+// Execution state for a hart doing something other than shifting.
 typedef union tagged {
+    // An instruction needs fetched before we can do anything. This happens
+    // both at reset, but also as the second cycle of a store.
     void ResetState;
+    // An instruction is in cache and we're good to go.
     void RunState;
+    // We're doing the second cycle of a load.
     struct {
+        // Register where the loaded data is deposited.
         RegId rd;
+        // The two bottom bits of the effective address, recorded to help us
+        // place byte/halfword quantities into the right bits of the register.
         Bit#(2) lsbs;
+        // The f3 field from the instruction, giving us the transaction size
+        // and sign/zero extension.
         Bit#(3) saved_funct3;
     } LoadState;
+    // Something invalid happened and we are parked.
     void HaltState;
 } BaseHartState deriving (Bits, FShow);
 
+typedef enum { Left, Right } ShiftDir deriving (Bits, FShow);
+
+// State needed by a hart in every stage of the pipeline.
 typedef struct {
+    // Who are we?
     HartId hart;
+    // Where are we?
     Bit#(addr_width) pc;
+    // What are we doing?
     HartState state;
 } CoreState#(numeric type addr_width) deriving (Bits, FShow);
 
+///////////////////////////////////////////////////////////////////////////////
+// Pipeline register contents.
+
+// Data on stage 1's input register.
 typedef struct {
     CoreState#(addr_width) cs;
+    // Cached result of last memory read, often an instruction but sometimes
+    // data - depends on the execution state.
     Word cache;
 } Stage1#(numeric type addr_width) deriving (Bits, FShow);
 
-instance DefaultValue#(Stage1#(addr_width));
-    defaultValue = Stage1
-        { cs: CoreState
-            { hart: 2
-            , pc: 2 * 2
-            , state: tagged Base tagged ResetState
-            }
-        , cache: 0
-        };
-endinstance
-
+// Data on stage 2's input register.
 typedef struct {
     CoreState#(addr_width) cs;
+    // Cached result of last memory read, forwarded from stage1.
     Word cache;
 } Stage2#(numeric type addr_width) deriving (Bits, FShow);
 
-instance DefaultValue#(Stage2#(addr_width));
-    defaultValue = Stage2
-        { cs: CoreState
-            { hart: 1
-            , pc: 1 * 2
-            , state: tagged Base tagged ResetState
-            }
-        , cache: 0
-        };
-endinstance
-
+// Data on stage 3's input register.
 typedef struct {
     CoreState#(addr_width) cs;
+    // Cached result of last memory read, forwarded from stage2.
     Word cache;
+    // Value of register addressed by rs1 field.
     Word x1;
+    // Value of register addressed by rs2 field.
     Word x2;
+    // Result of bottom section of comparator chain.
     Bit#(25) diff_lo;
+    // Record of the value used on the right hand side of the comparator.
     Word rhs;
 } Stage3#(numeric type addr_width) deriving (Bits, FShow);
 
-instance DefaultValue#(Stage3#(addr_width));
-    defaultValue = Stage3
-        { cs: CoreState
-            { hart: 0
-            , pc: 0 * 2
-            , state: tagged Base tagged ResetState
-            }
-        , cache: 0
-        , x1: 0
-        , x2: 0
-        , diff_lo: 0
-        , rhs: 0
-        };
-endinstance
-
+// Data on stage 4's input register.
 typedef struct {
     CoreState#(addr_width) cs;
+    // If Valid, gives the register and data to write to the register file.
     Maybe#(Tuple2#(RegId, Word)) rf_write;
 } Stage4#(numeric type addr_width) deriving (Bits, FShow);
 
-instance DefaultValue#(Stage4#(addr_width));
-    defaultValue = Stage4
-        { cs: CoreState
-            { hart: 3
-            , pc: 3 * 2
-            , state: tagged Base tagged ResetState
-            }
-        , rf_write: tagged Invalid
-        };
-endinstance
+///////////////////////////////////////////////////////////////////////////////
+// Implementation
 
 module mkTwisty5#(
     ShifterFlavor shifter_flavor,
@@ -164,26 +190,87 @@ provisos (
     // addr_width is <= XLEN-2
     Add#(addr_width, dropped_addr_msbs, xlen_m2)
 );
-    // Crops a Word value for use as a smaller word address of addr_width bits.
-    function Bit#(addr_width) crop_addr(Word addr);
-        Bit#(xlen_m2) div4 = truncateLSB(addr);
-        return truncate(div4);
-    endfunction
-
     // The big shared regfile.
     RegFile2H regfile <- mkRegFile2H;
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Stage 1 - decoding some state, starting the regfile read.
+    // Pipeline. We initialize the register at each pipeline stage to set all
+    // four harts to ResetState, each PC to the appropriate reset vector, and
+    // hart 0 ready to go in stage 3 so it will fetch first.
+    Pipe#(Stage1#(addr_width), Stage2#(addr_width)) s1mod <-
+        mkStage1(regfile, Stage1
+            { cs: CoreState
+                { hart: 2
+                , pc: 2 * 2
+                , state: tagged Base tagged ResetState
+                }
+            , cache: 0
+            });
+    Pipe#(Stage2#(addr_width), Stage3#(addr_width)) s2mod <-
+        mkStage2(regfile, Stage2
+            { cs: CoreState
+                { hart: 1
+                , pc: 1 * 2
+                , state: tagged Base tagged ResetState
+                }
+            , cache: 0
+            });
+    Pipe#(Stage3#(addr_width), Stage4#(addr_width)) s3mod <-
+        mkStage3(shifter_flavor, bus, Stage3
+            { cs: CoreState
+                { hart: 0
+                , pc: 0 * 2
+                , state: tagged Base tagged ResetState
+                }
+            , cache: 0
+            , x1: 0
+            , x2: 0
+            , diff_lo: 0
+            , rhs: 0
+            });
+    Pipe#(Stage4#(addr_width), Stage1#(addr_width)) s4mod <-
+        mkStage4(regfile, bus, Stage4
+            { cs: CoreState
+                { hart: 3
+                , pc: 3 * 2
+                , state: tagged Base tagged ResetState
+                }
+            , rf_write: tagged Invalid
+            });
 
-    // Input register for stage 1.
-    Reg#(Stage1#(addr_width)) stage1 <- mkReg(defaultValue);
-    // Input register for stage 2.
-    Reg#(Stage2#(addr_width)) stage2 <- mkReg(defaultValue);
+    mkConnection(s1mod.out, s2mod.feed);
+    mkConnection(s2mod.out, s3mod.feed);
+    mkConnection(s3mod.out, s4mod.feed);
+    mkConnection(s4mod.out, s1mod.feed);
+
+    // Diagnostic outputs
+    method HartId next_hart_id = s3mod.state.cs.hart;
+    method HartState next_hart_state = s3mod.state.cs.state;
+    method Bool halted = s3mod.state.cs.state matches tagged Base(tagged HaltState) ? True : False;
+endmodule
+
+///////////////////////////////////////////////////////////////////////////////
+// Generic pipeline module interface
+
+(* always_ready, always_enabled *)
+interface Pipe#(type i, type o);
+    interface Put#(i) feed;
+    interface Get#(o) out;
+
+    method i state;
+endinterface
+
+///////////////////////////////////////////////////////////////////////////////
+// Stage 1 module
+
+module mkStage1#(
+    RegFile2H regfile,
+    Stage1#(aw) start_state
+) (Pipe#(Stage1#(aw), Stage2#(aw)));
+    let s <- mkReg(start_state);
+    let stage2 <- mkBypassWire;
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule do_stage_1;
-        let s = stage1;
         InstFields fields = unpack(s.cache);
         regfile.read(s.cs.hart, fields.rs1, fields.rs2);
         stage2 <= Stage2
@@ -192,15 +279,23 @@ provisos (
             };
     endrule
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Stage 2 - first part of execute.
+    interface Put feed = toPut(asReg(s));
+    interface Get out = wireGet(stage2);
+    method state = s;
+endmodule
 
-    Reg#(Stage3#(addr_width)) stage3 <- mkReg(defaultValue);
+///////////////////////////////////////////////////////////////////////////////
+// Stage 2 module
+
+module mkStage2#(
+    RegFile2H regfile,
+    Stage2#(aw) start_state
+) (Pipe#(Stage2#(aw), Stage3#(aw)));
+    let s <- mkReg(start_state);
+    let stage3 <- mkBypassWire;
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule do_stage_2;
-        let s = stage2;
-
         // We're going to assume the cache contents are an instruction. If we're
         // wrong, the result will be ignored anyway. This should reduce logic.
         InstFields fields = unpack(s.cache);
@@ -238,29 +333,46 @@ provisos (
             };
     endrule
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Stage 3
+    interface Put feed = toPut(asReg(s));
+    interface Get out = wireGet(stage3);
+    method state = s;
+endmodule
 
-    Reg#(Stage4#(addr_width)) stage4 <- mkReg(defaultValue);
+///////////////////////////////////////////////////////////////////////////////
+// Stage 3 module
+
+module mkStage3#(
+    ShifterFlavor shifter_flavor,
+    TwistyBus#(aw) bus,
+    Stage3#(aw) start_state
+) (Pipe#(Stage3#(aw), Stage4#(aw)))
+provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
+    let s <- mkReg(start_state);
+    let stage4 <- mkBypassWire;
 
     let no_write = replicate(tagged Invalid);
 
+    // Crops a Word value for use as a smaller word address of addr_width bits.
+    function Bit#(aw) crop_addr(Word addr);
+        Bit#(xlen_m2) div4 = truncateLSB(addr);
+        return truncate(div4);
+    endfunction
+
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_reset (stage3.cs.state matches tagged Base (tagged ResetState));
+    rule do_stage3_reset (s.cs.state matches tagged Base (tagged ResetState));
         stage4 <= Stage4
             { cs: CoreState
-                { hart: stage3.cs.hart
-                , pc: stage3.cs.pc
+                { hart: s.cs.hart
+                , pc: s.cs.pc
                 , state: tagged Base tagged RunState
                 }
             , rf_write: tagged Invalid
             };
-        bus.issue(stage3.cs.pc, no_write);
+        bus.issue(s.cs.pc, no_write);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_run (stage3.cs.state matches tagged Base (tagged RunState));
-        let s = stage3;
+    rule do_stage3_run (s.cs.state matches tagged Base (tagged RunState));
         let inst = s.cache;
 
         let diff_hi = {1'b0, s.x1[31:24]}
@@ -297,7 +409,7 @@ provisos (
         Word imm_b = {
             signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
-        Bit#(addr_width) next_pc = s.cs.pc + 1; // we will MUTATE this for jumps!
+        Bit#(aw) next_pc = s.cs.pc + 1; // we will MUTATE this for jumps!
 
         let pc00 = {s.cs.pc, 2'b00};
 
@@ -445,8 +557,7 @@ provisos (
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_load (stage3.cs.state matches tagged Base (tagged LoadState .f));
-        let s = stage3;
+    rule do_stage3_load (s.cs.state matches tagged Base (tagged LoadState .f));
         let size = f.saved_funct3[1:0];
         let zext = f.saved_funct3[2] == 1;
         let shifted = s.cache >> {f.lsbs, 3'b0};
@@ -473,82 +584,92 @@ provisos (
     endrule
 
     if (shifter_flavor != BarrelShifter)
+        (* fire_when_enabled, no_implicit_conditions *)
+        rule do_stage3_shift (s.cs.state matches tagged ShiftState .f);
+            let by_byte = shifter_flavor == LeapShifter && f.amt > 8;
+            let r = by_byte ? begin
+                case (f.dir) matches
+                    Left: {truncate(s.x1), 8'b0};
+                    Right: {Bit#(8)'(signExtend(f.fill)), truncateLSB(s.x1)};
+                endcase
+            end : begin
+                case (f.dir) matches
+                    Left: {truncate(s.x1), 1'b0};
+                    Right: {f.fill, truncateLSB(s.x1)};
+                endcase
+            end;
+            InstFields fields = unpack(s.cache);
+            let rf_write = (f.amt != 0)
+                ? tagged Valid tuple2(fields.rd, r)
+                : tagged Invalid;
+
+            let next = (f.amt == 0)
+                ? tagged Base tagged RunState
+                : tagged ShiftState {
+                    amt: f.amt - (by_byte ? 8 : 1),
+                    dir: f.dir,
+                    fill: f.fill
+                };
+
+            stage4 <= Stage4
+                { cs: CoreState
+                    { hart: s.cs.hart
+                    , pc: s.cs.pc
+                    , state: next
+                    }
+                , rf_write: rf_write
+                };
+
+            // We'll issue a dummy fetch for the next instruction during every
+            // cycle of the shift, to maintain transaction ordering.
+            bus.issue(s.cs.pc, no_write);
+        endrule
+    else
+        // This rule is important for convincing the compiler that we've
+        // totally covered the state enum and always drive stage4.
+        (* fire_when_enabled, no_implicit_conditions *)
+        rule do_stage3_shift_dummy (s.cs.state matches tagged ShiftState .*);
+            stage4 <= ?;
+            bus.issue(?, ?);
+        endrule
+
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_shift (stage3.cs.state matches tagged ShiftState .f);
-        let s = stage3;
-
-        let by_byte = shifter_flavor == LeapShifter && f.amt > 8;
-        let r = by_byte ? begin
-            case (f.dir) matches
-                Left: {truncate(s.x1), 8'b0};
-                Right: {Bit#(8)'(signExtend(f.fill)), truncateLSB(s.x1)};
-            endcase
-        end : begin
-            case (f.dir) matches
-                Left: {truncate(s.x1), 1'b0};
-                Right: {f.fill, truncateLSB(s.x1)};
-            endcase
-        end;
-        InstFields fields = unpack(s.cache);
-        let rf_write = (f.amt != 0)
-            ? tagged Valid tuple2(fields.rd, r)
-            : tagged Invalid;
-
-        let next = (f.amt == 0)
-            ? tagged Base tagged RunState
-            : tagged ShiftState {
-                amt: f.amt - (by_byte ? 8 : 1),
-                dir: f.dir,
-                fill: f.fill
-            };
-
-        stage4 <= Stage4
-            { cs: CoreState
-                { hart: s.cs.hart
-                , pc: s.cs.pc
-                , state: next
-                }
-            , rf_write: rf_write
-            };
-
-        // We'll issue a dummy fetch for the next instruction during every
-        // cycle of the shift, to maintain transaction ordering.
+    rule do_stage3_halt (s.cs.state matches tagged Base (tagged HaltState));
+        stage4 <= Stage4 { cs: s.cs, rf_write: tagged Invalid };
         bus.issue(s.cs.pc, no_write);
     endrule
 
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_halt (stage3.cs.state matches tagged Base (tagged HaltState));
-        stage4 <= Stage4 { cs: stage3.cs, rf_write: tagged Invalid };
-        bus.issue(stage3.cs.pc, no_write);
-    endrule
+    interface Put feed = toPut(asReg(s));
+    interface Get out = wireGet(stage4);
+    method state = s;
+endmodule
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Stage 4 - bus response
+///////////////////////////////////////////////////////////////////////////////
+// Stage 4 module
 
-    let stage1_wire <- mkBypassWire;
+module mkStage4#(
+    RegFile2H regfile,
+    TwistyBus#(aw) bus,
+    Stage4#(aw) start_state
+) (Pipe#(Stage4#(aw), Stage1#(aw)));
+    let s <- mkReg(start_state);
+    let stage1 <- mkBypassWire;
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule do_stage_4;
         let response = bus.response;
-        let s = stage4;
-
         if (s.rf_write matches tagged Valid {.rd, .value})
             regfile.write(s.cs.hart, rd, value);
 
-        stage1_wire <= Stage1
+        stage1 <= Stage1
             { cs: s.cs
             , cache: response
             };
     endrule
 
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule close_the_loop;
-        stage1 <= stage1_wire;
-    endrule
-
-    method HartId next_hart_id = stage3.cs.hart;
-    method HartState next_hart_state = stage3.cs.state;
-    method Bool halted = stage3.cs.state matches tagged Base(tagged HaltState) ? True : False;
+    interface Put feed = toPut(asReg(s));
+    interface Get out = wireGet(stage1);
+    method state = s;
 endmodule
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -593,5 +714,13 @@ module mkRegFile2H (RegFile2H);
 
     method Tuple2#(Word, Word) read_result = tuple2(rf0.a.read, rf1.a.read);
 endmodule
+
+function Get#(a) wireGet(Wire#(a) w);
+    return interface Get;
+        method ActionValue#(a) get;
+            return w;
+        endmethod
+    endinterface;
+endfunction
 
 endpackage
