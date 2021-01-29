@@ -68,7 +68,11 @@ typedef union tagged {
 typedef union tagged {
     void ResetState;
     void RunState;
-    RegId LoadState;
+    struct {
+        RegId rd;
+        Bit#(2) lsbs;
+        Bit#(3) saved_funct3;
+    } LoadState;
     void HaltState;
 } BaseHartState deriving (Bits, FShow);
 
@@ -321,17 +325,26 @@ provisos (
                     let ea = s.x1 + imm_i;
                     let aligned = case (fields.funct3) matches
                         'b010: (ea[1:0] == 0);
+                        'b?01: (ea[0] == 0);
+                        'b?00: True;
                         default: False;
                     endcase;
 
                     other_addr = tagged Valid crop_addr(ea);
-                    if (aligned) next_state = tagged Base tagged LoadState fields.rd;
+                    if (aligned) next_state = tagged Base tagged LoadState {
+                        rd: fields.rd,
+                        lsbs: ea[1:0],
+                        saved_funct3: fields.funct3
+                    };
                     else next_state = tagged Base tagged HaltState;
                 end
                 // Sx
                 'b0100011: begin
                     let ea = s.x1 + imm_s;
+                    let lsbs = ea[1:0];
                     let aligned = case (fields.funct3) matches
+                        'b000: True;
+                        'b001: (ea[1] == 0);
                         'b010: (ea[1:0] == 0);
                         default: False;
                     endcase;
@@ -339,7 +352,17 @@ provisos (
                     if (aligned) begin
                         next_state = tagged Base tagged ResetState;
                         function Maybe#(Bit#(8)) bytelane(Integer i);
-                            return tagged Valid ((s.x2 >> (8 * i))[7:0]);
+                            Bit#(2) ibits = fromInteger(i);
+                            return case (fields.funct3[1:0]) matches
+                                'b00: (ea[1:0] == ibits
+                                    ? tagged Valid (s.x2[7:0])
+                                    : tagged Invalid);
+                                'b01: (ea[1] == ibits[1]
+                                    ? tagged Valid (ibits[0] == 1
+                                        ? s.x2[15:8] : s.x2[7:0])
+                                    : tagged Invalid);
+                                'b10: tagged Valid ((s.x2 >> {ibits, 3'b000})[7:0]);
+                            endcase;
                         endfunction
                         mem_write_data = genWith(bytelane);
                     end else next_state = tagged Base tagged HaltState;
@@ -427,14 +450,28 @@ provisos (
                     };
                 return tuple2(s4, tuple2(s.cs.pc, no_write));
             endactionvalue);
-            tagged Base (tagged LoadState .rd): return (actionvalue
+            tagged Base (tagged LoadState {rd: .rd, lsbs: .lsbs, saved_funct3: .f3}): return (actionvalue
+                let size = f3[1:0];
+                let zext = f3[2] == 1;
+                let shifted = s.cache >> {lsbs, 3'b0};
+                let val = case (size) matches
+                    'b00: begin
+                        let b = shifted[7:0];
+                        return zext ? extend(b) : signExtend(b);
+                    end
+                    'b01: begin
+                        let b = shifted[15:0];
+                        return zext ? extend(b) : signExtend(b);
+                    end
+                    default: s.cache;
+                endcase;
                 let s4 = Stage4
                     { cs: CoreState
                         { hart: s.cs.hart
                         , pc: s.cs.pc
                         , state: tagged Base tagged RunState
                         }
-                    , rf_write: tagged Valid tuple2(rd, s.cache)
+                    , rf_write: tagged Valid tuple2(rd, val)
                     };
                 return tuple2(s4, tuple2(s.cs.pc, no_write));
             endactionvalue);
