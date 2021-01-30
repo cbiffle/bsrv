@@ -26,7 +26,7 @@ module mkTb ();
     Reg#(Bool) test_complete <- mkReg(False);
     Reg#(Maybe#(Tuple2#(Bit#(14), Vector#(4, Maybe#(Bit#(8)))))) delayed_issue <- mkReg(tagged Invalid);
 
-    Twisty5#(14) uut <- mkTwisty5(SerialShifter, bus);
+    Twisty5#(14) uut <- mkTwisty5(bus);
 
     rule delay_addr;
         delayed_issue <= issue_wire.wget;

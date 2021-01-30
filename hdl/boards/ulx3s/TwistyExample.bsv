@@ -38,7 +38,7 @@ module mkTwistyX (Top);
         else ctr <= ctr - 1;
     endrule
 
-    Twisty5Soc soc <- mkTwisty5Soc(BarrelShifter);
+    Twisty5Soc soc <- mkTwisty5Soc;
 
     let dsp <- mkDummySerialPort;
 

@@ -19,7 +19,7 @@ interface Twisty5Soc;
 endinterface
 
 (* synthesize *)
-module mkTwisty5Soc#(ShifterFlavor shifter_flavor) (Twisty5Soc);
+module mkTwisty5Soc (Twisty5Soc);
     BRAM_PORT_BE#(Bit#(8), Word, 4) ram <- mkBRAMCore1BELoad(256, False,
         "../hdl/examples/twisty.readmemb", True);
 
@@ -39,7 +39,7 @@ module mkTwisty5Soc#(ShifterFlavor shifter_flavor) (Twisty5Soc);
         endaction;
     endfunction
 
-    Twisty5#(9) core <- mkTwisty5(shifter_flavor, interface TwistyBus#(9);
+    Twisty5#(9) core <- mkTwisty5(interface TwistyBus#(9);
         method Action issue(address, write_data);
             let {io, addr} = split(address);
             if (io == 1'b1) lanewrite(outport, write_data);

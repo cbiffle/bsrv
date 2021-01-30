@@ -18,22 +18,13 @@
 // cycle. Each thread takes 4 system clock cycles to execute most instructions,
 // so at 80MHz system clock each thread runs at 20MIPS. (Load and store
 // operations take twice as long due to bus contention.)
-//
-// You can select the shifter implementation at instantiation.
-// - Serial: uses a shift register and moves data by one bit per _thread
-//   cycle,_ meaning one bit per 4 system clocks. This is glacially slow but
-//   very compact. Shifts take up to 33 thread cycles or 132 system cycles.
-// - Leap: also uses a shift register, but with mux paths to move by 8 bits in
-//   addition to 1. Shifts take up to 10 thread / 40 system cycles. Larger than
-//   Serial but not by a lot.
-// - Barrel: full barrel shifter. All shifts complete in 1 cycle. Costs around
-//   150-200 LUTs, i.e. makes the core something like 11% larger.
 
 package Twisty5;
 
 import BRAMCore::*;
 import Connectable::*;
 import GetPut::*;
+import UniqueWrappers::*;
 import Vector::*;
 
 import Common::*;
@@ -71,39 +62,10 @@ interface Twisty5#(numeric type addr_width);
     method HartState next_hart_state;
 endinterface
 
-// Types of shifter you can request.
-//
-// Notice that this type does not derive Bits. That's because it exists only at
-// compile time. If you ever get an error about this needing a Bits instance,
-// something has gone horribly wrong.
-typedef enum {
-    SerialShifter,
-    LeapShifter,
-    BarrelShifter
-} ShifterFlavor deriving (Eq, FShow);
-
 ///////////////////////////////////////////////////////////////////////////////
 // Internal state.
 
-// Execution state for a hart. This is divided into Base vs ShiftState because
-// it helps bsc notice that ShiftState is not used when the shifter is a barrel
-// shifter, and eliminate its signals. It doesn't work 100% reliably and merits
-// revisiting later (TODO).
-typedef union tagged {
-    // States for executing instructions.
-    BaseHartState Base;
-    // State for executing a serial shift operation.
-    struct {
-        // Bit being shifted in, for right shifts only.
-        bit fill;
-        // Direction of shift.
-        ShiftDir dir;
-        // Bits remaining.
-        UInt#(5) amt;
-    } ShiftState;
-} HartState deriving (Bits, FShow);
-
-// Execution state for a hart doing something other than shifting.
+// Execution state for a hart.
 typedef union tagged {
     // An instruction needs fetched before we can do anything. This happens
     // both at reset, but also as the second cycle of a store.
@@ -123,7 +85,7 @@ typedef union tagged {
     } LoadState;
     // Something invalid happened and we are parked.
     void HaltState;
-} BaseHartState deriving (Bits, FShow);
+} HartState deriving (Bits, FShow);
 
 typedef enum { Left, Right } ShiftDir deriving (Bits, FShow);
 
@@ -181,7 +143,6 @@ typedef struct {
 // Implementation
 
 module mkTwisty5#(
-    ShifterFlavor shifter_flavor,
     TwistyBus#(addr_width) bus
 ) (Twisty5#(addr_width))
 provisos (
@@ -201,7 +162,7 @@ provisos (
             { cs: CoreState
                 { hart: 2
                 , pc: 2 * 2
-                , state: tagged Base tagged ResetState
+                , state: tagged ResetState
                 }
             , cache: 0
             });
@@ -210,16 +171,16 @@ provisos (
             { cs: CoreState
                 { hart: 1
                 , pc: 1 * 2
-                , state: tagged Base tagged ResetState
+                , state: tagged ResetState
                 }
             , cache: 0
             });
     Pipe#(Stage3#(addr_width), Stage4#(addr_width)) s3mod <-
-        mkStage3(shifter_flavor, bus, Stage3
+        mkStage3(bus, Stage3
             { cs: CoreState
                 { hart: 0
                 , pc: 0 * 2
-                , state: tagged Base tagged ResetState
+                , state: tagged ResetState
                 }
             , cache: 0
             , x1: 0
@@ -232,7 +193,7 @@ provisos (
             { cs: CoreState
                 { hart: 3
                 , pc: 3 * 2
-                , state: tagged Base tagged ResetState
+                , state: tagged ResetState
                 }
             , rf_write: tagged Invalid
             });
@@ -245,7 +206,7 @@ provisos (
     // Diagnostic outputs
     method HartId next_hart_id = s3mod.state.cs.hart;
     method HartState next_hart_state = s3mod.state.cs.state;
-    method Bool halted = s3mod.state.cs.state matches tagged Base(tagged HaltState) ? True : False;
+    method Bool halted = s3mod.state.cs.state matches tagged HaltState ? True : False;
 endmodule
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -342,7 +303,6 @@ endmodule
 // Stage 3 module
 
 module mkStage3#(
-    ShifterFlavor shifter_flavor,
     TwistyBus#(aw) bus,
     Stage3#(aw) start_state
 ) (Pipe#(Stage3#(aw), Stage4#(aw)))
@@ -352,6 +312,8 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
 
     let no_write = replicate(tagged Invalid);
 
+    let barrel_shifter <- mkUniqueWrapper(barrel_shift_datapath);
+
     // Crops a Word value for use as a smaller word address of addr_width bits.
     function Bit#(aw) crop_addr(Word addr);
         Bit#(xlen_m2) div4 = truncateLSB(addr);
@@ -359,12 +321,12 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
     endfunction
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_reset (s.cs.state matches tagged Base (tagged ResetState));
+    rule do_stage3_reset (s.cs.state matches tagged ResetState);
         stage4 <= Stage4
             { cs: CoreState
                 { hart: s.cs.hart
                 , pc: s.cs.pc
-                , state: tagged Base tagged RunState
+                , state: tagged RunState
                 }
             , rf_write: tagged Invalid
             };
@@ -372,7 +334,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_run (s.cs.state matches tagged Base (tagged RunState));
+    rule do_stage3_run (s.cs.state matches tagged RunState);
         let inst = s.cache;
 
         let diff_hi = {1'b0, s.x1[31:24]}
@@ -384,22 +346,6 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
         let unsigned_less_than = unpack(difference[32]);
 
         InstFields fields = unpack(inst);
-
-        // This is the barrel shifter, in the cheapest formulation I've
-        // found for this FPGA technology. If parameters select a serial
-        // shifter, the output will go unused, and we are trusting in the
-        // synthesis toolchain to optimize this away.
-        // Actual cases in funct3 we're distinguishing:
-        //    'b001: return reverseBits(x1);
-        //    'b100: return x1;
-        // Manual k-mapping shows we can depend on either bit 0 or 3.
-        let shifter_lhs = case (fields.funct3[0]) matches
-            'b1: return reverseBits(s.x1);
-            'b0: return s.x1;
-        endcase;
-        bit shift_fill = msb(shifter_lhs) & fields.funct7[5];
-        Int#(33) shift_ext = unpack({shift_fill, shifter_lhs});
-        let shifter_out = truncate(pack(shift_ext >> s.rhs[4:0]));
 
         Word imm_i = signExtend(inst[31:20]);
         Word imm_s = signExtend({inst[31:25], inst[11:7]});
@@ -415,7 +361,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
         Bit#(aw) next_pc = crop_addr(pc1); // we will MUTATE this for jumps!
 
         // Behold, the Big Fricking RV32I Case Discriminator!
-        let next_state = tagged Base tagged RunState;
+        let next_state = tagged RunState;
         Vector#(4, Maybe#(Bit#(8))) mem_write_data = replicate(tagged Invalid);
         let other_addr = tagged Invalid;
         Maybe#(Tuple2#(RegId, Word)) rf_write = tagged Invalid;
@@ -458,12 +404,12 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                 endcase;
 
                 other_addr = tagged Valid crop_addr(ea);
-                if (aligned) next_state = tagged Base tagged LoadState {
+                if (aligned) next_state = tagged LoadState {
                     rd: fields.rd,
                     lsbs: ea[1:0],
                     saved_funct3: fields.funct3
                 };
-                else next_state = tagged Base tagged HaltState;
+                else next_state = tagged HaltState;
             end
             // Sx
             'b0100011: begin
@@ -477,7 +423,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                 endcase;
                 other_addr = tagged Valid crop_addr(ea);
                 if (aligned) begin
-                    next_state = tagged Base tagged ResetState;
+                    next_state = tagged ResetState;
                     function Maybe#(Bit#(8)) bytelane(Integer i);
                         Bit#(2) ibits = fromInteger(i);
                         return case (fields.funct3[1:0]) matches
@@ -492,7 +438,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                         endcase;
                     endfunction
                     mem_write_data = genWith(bytelane);
-                end else next_state = tagged Base tagged HaltState;
+                end else next_state = tagged HaltState;
             end
             // ALU reg/immediate
             'b0?10011: begin
@@ -507,42 +453,27 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                             : s.x1 + s.rhs;
                     end
                     // Left shift
-                    'b001: case (shifter_flavor) matches
-                        BarrelShifter: alu_result = reverseBits(shifter_out);
-                        default: begin
-                            let shift_dist = s.rhs[4:0];
-                            next_state = tagged ShiftState {
-                                amt: unpack(shift_dist),
-                                fill: 0,
-                                dir: Left
-                            };
-                            alu_result = s.x1;
-                        end
-                    endcase
+                    'b001: begin
+                        let x <- barrel_shifter.func(tuple4(
+                            s.x1, s.rhs[4:0], Left, ?));
+                        alu_result = x;
+                    end
                     // SLTI / SLT
                     'b010: alu_result = signed_less_than ? 1 : 0;
                     // SLTIU / SLTU
                     'b011: alu_result = unsigned_less_than ? 1 : 0;
                     'b100: alu_result = s.x1 ^ s.rhs; // XORI / XOR
-                    'b101: case (shifter_flavor) matches
-                        BarrelShifter: alu_result = shifter_out;
-                        default: begin
-                            let shift_dist = s.rhs[4:0];
-                            let fill = fields.funct7[5] & s.x1[31];
-                            next_state = tagged ShiftState {
-                                amt: unpack(shift_dist),
-                                fill: fill,
-                                dir: Right
-                            };
-                            alu_result = s.x1;
-                        end
-                    endcase
+                    'b101: begin
+                        let x <- barrel_shifter.func(tuple4(
+                            s.x1, s.rhs[4:0], Right, fields.funct7[5] == 1));
+                        alu_result = x;
+                    end
                     'b110: alu_result = s.x1 | s.rhs; // ORI / OR
                     'b111: alu_result = s.x1 & s.rhs; // ANDI / AND
                 endcase
                 rf_write = tagged Valid tuple2(fields.rd, alu_result);
             end
-            default: next_state = tagged Base tagged HaltState;
+            default: next_state = tagged HaltState;
         endcase
 
         let a = fromMaybe(next_pc, other_addr);
@@ -558,10 +489,13 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_load (s.cs.state matches tagged Base (tagged LoadState .f));
+    rule do_stage3_load (s.cs.state matches tagged LoadState .f);
         let size = f.saved_funct3[1:0];
         let zext = f.saved_funct3[2] == 1;
-        let shifted = s.cache >> {f.lsbs, 3'b0};
+
+        let shifted <- barrel_shifter.func(tuple4(
+            s.cache, {f.lsbs, 3'b0}, Right, ?));
+
         let val = case (size) matches
             'b00: begin
                 let b = shifted[7:0];
@@ -577,65 +511,15 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
             { cs: CoreState
                 { hart: s.cs.hart
                 , pc: s.cs.pc
-                , state: tagged Base tagged RunState
+                , state: tagged RunState
                 }
             , rf_write: tagged Valid tuple2(f.rd, val)
             };
         bus.issue(s.cs.pc, no_write);
     endrule
 
-    if (shifter_flavor != BarrelShifter)
-        (* fire_when_enabled, no_implicit_conditions *)
-        rule do_stage3_shift (s.cs.state matches tagged ShiftState .f);
-            let by_byte = shifter_flavor == LeapShifter && f.amt > 8;
-            let r = by_byte ? begin
-                case (f.dir) matches
-                    Left: {truncate(s.x1), 8'b0};
-                    Right: {Bit#(8)'(signExtend(f.fill)), truncateLSB(s.x1)};
-                endcase
-            end : begin
-                case (f.dir) matches
-                    Left: {truncate(s.x1), 1'b0};
-                    Right: {f.fill, truncateLSB(s.x1)};
-                endcase
-            end;
-            InstFields fields = unpack(s.cache);
-            let rf_write = (f.amt != 0)
-                ? tagged Valid tuple2(fields.rd, r)
-                : tagged Invalid;
-
-            let next = (f.amt == 0)
-                ? tagged Base tagged RunState
-                : tagged ShiftState {
-                    amt: f.amt - (by_byte ? 8 : 1),
-                    dir: f.dir,
-                    fill: f.fill
-                };
-
-            stage4 <= Stage4
-                { cs: CoreState
-                    { hart: s.cs.hart
-                    , pc: s.cs.pc
-                    , state: next
-                    }
-                , rf_write: rf_write
-                };
-
-            // We'll issue a dummy fetch for the next instruction during every
-            // cycle of the shift, to maintain transaction ordering.
-            bus.issue(s.cs.pc, no_write);
-        endrule
-    else
-        // This rule is important for convincing the compiler that we've
-        // totally covered the state enum and always drive stage4.
-        (* fire_when_enabled, no_implicit_conditions *)
-        rule do_stage3_shift_dummy (s.cs.state matches tagged ShiftState .*);
-            stage4 <= ?;
-            bus.issue(?, ?);
-        endrule
-
     (* fire_when_enabled, no_implicit_conditions *)
-    rule do_stage3_halt (s.cs.state matches tagged Base (tagged HaltState));
+    rule do_stage3_halt (s.cs.state matches tagged HaltState);
         stage4 <= Stage4 { cs: s.cs, rf_write: tagged Invalid };
         bus.issue(s.cs.pc, no_write);
     endrule
@@ -722,6 +606,21 @@ function Get#(a) wireGet(Wire#(a) w);
             return w;
         endmethod
     endinterface;
+endfunction
+
+function Word barrel_shift_datapath(Tuple4#(Word, Bit#(5), ShiftDir, Bool) args);
+    let {lhs, amt, dir, sext} = args;
+    let prepared_lhs = case (dir) matches
+        Left: reverseBits(lhs);
+        Right: lhs;
+    endcase;
+    bit fill = msb(lhs) & pack(sext);
+    Int#(33) ext = unpack({fill, lhs});
+    let shifted = truncate(pack(ext >> amt));
+    return case (dir) matches
+        Left: reverseBits(shifted);
+        Right: shifted;
+    endcase;
 endfunction
 
 endpackage

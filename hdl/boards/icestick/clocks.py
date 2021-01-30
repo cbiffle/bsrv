@@ -1,2 +1,2 @@
 ctx.addClock("clk_12mhz", 12)
-ctx.addClock("innards.clk_main", 65)
+ctx.addClock("innards.clk_main", 60)

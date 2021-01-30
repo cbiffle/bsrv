@@ -23,8 +23,8 @@ module mkTwisty (Top);
         4'b1111,
         4'b1111,
         0,
-        49,
-        3,
+        79,
+        4,
         1,
         clk_12mhz,
         reset_by reset_gen.new_rst
@@ -57,16 +57,7 @@ module mkTwistyX (Top);
         else ctr <= ctr - 1;
     endrule
 
-    let shifter_flavor =
-`ifdef TWISTY_BARREL_SHIFTER
-        BarrelShifter;
-`elsif TWISTY_LEAP_SHIFTER
-        LeapShifter;
-`else
-        SerialShifter;
-`endif
-
-    Twisty5Soc soc <- mkTwisty5Soc(shifter_flavor);
+    Twisty5Soc soc <- mkTwisty5Soc;
 
     method led = {truncate(soc.out), ctr[23]};
     method dcd_n = 0;
