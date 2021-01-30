@@ -409,9 +409,10 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
         Word imm_b = {
             signExtend(inst[31]), inst[7], inst[30:25], inst[11:8], 1'b0};
 
-        Bit#(aw) next_pc = s.cs.pc + 1; // we will MUTATE this for jumps!
-
         let pc00 = {s.cs.pc, 2'b00};
+
+        Word pc1 = {extend(s.cs.pc) + 1, 2'b00};
+        Bit#(aw) next_pc = crop_addr(pc1); // we will MUTATE this for jumps!
 
         // Behold, the Big Fricking RV32I Case Discriminator!
         let next_state = tagged Base tagged RunState;
@@ -426,11 +427,11 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
             // JAL
             'b1101111: begin
                 next_pc = truncateLSB(pc00 + truncate(imm_j));
-                rf_write = tagged Valid tuple2(fields.rd, {0, s.cs.pc + 1, 2'b00});
+                rf_write = tagged Valid tuple2(fields.rd, pc1);
             end
             // JALR
             'b1100111: begin
-                rf_write = tagged Valid tuple2(fields.rd, extend({s.cs.pc + 1, 2'b00}));
+                rf_write = tagged Valid tuple2(fields.rd, pc1);
                 next_pc = crop_addr(s.x1 + imm_i);
             end
             // Bxx
