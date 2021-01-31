@@ -264,22 +264,21 @@ module mkStage2#(
 
         let {x1, x2} = regfile.read_result;
 
-        // Observation: the three cases for this are as follows:
-        //    'b1100011: return x2; // Bxx
-        //    'b0110011: return x2; // ALU reg
-        //    'b0010011: return imm_i; // ALU imm
-        // I had originally expressed this as those three followed by a
+        // Observation: the cases for this are as follows:
+        //    'b1100011: x2; // Bxx
+        //    'b0110011: x2; // ALU reg
+        //    'b0010011: imm_i; // ALU immediate
+        //    'b1100111: imm_i; // JALR
+        //    'b0000011: imm_i; // Lx
+        // I had originally expressed this as those cases followed by a
         // `default: ?` case, expecting that the undefined value would make it
         // through to Verilog and get optimized by Yosys. Bluespec, however,
         // makes a decision on what the undefined value should be, generating
-        // more logic.
+        // more logic. Sigh.
         //
-        // Note that if you k-map that table, it's bit 5 that actually makes the
-        // decision in the defined cases. So:
-        let comp_rhs = case (fields.opcode[5]) matches
-            'b1: return x2; // Bxx, ALU reg
-            'b0: return imm_i; // ALU imm
-        endcase;
+        // And so I have manually k-mapped that table of bits. x2 is selected
+        // by bit 5, except for JALR, which is readily distinguished by bit 2.
+        let comp_rhs = (fields.opcode[5] & ~fields.opcode[2]) == 1 ? x2 : imm_i;
 
         // Get the comparison started one cycle early.
         let diff_lo = {1'b0, x1[23:0]} + {1'b1, ~comp_rhs[23:0]} + 1;
@@ -347,7 +346,6 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
 
         InstFields fields = unpack(inst);
 
-        Word imm_i = signExtend(inst[31:20]);
         Word imm_s = signExtend({inst[31:25], inst[11:7]});
         Word imm_u = {inst[31:12], 0};
         Word imm_j = {
@@ -378,7 +376,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
             // JALR
             'b1100111: begin
                 rf_write = tagged Valid tuple2(fields.rd, pc1);
-                next_pc = crop_addr(s.x1 + imm_i);
+                next_pc = crop_addr(s.x1 + s.rhs);
             end
             // Bxx
             'b1100011: begin
@@ -395,7 +393,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
             end
             // Lx
             'b0000011: begin
-                let ea = s.x1 + imm_i;
+                let ea = s.x1 + s.rhs;
                 let aligned = case (fields.funct3) matches
                     'b010: (ea[1:0] == 0);
                     'b?01: (ea[0] == 0);

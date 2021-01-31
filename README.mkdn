@@ -31,7 +31,7 @@ about the results. Numbers may be out of date.
 | Corny5 | hx1k | barrel | 1182 | 53.74 | ~27 | 1 |
 | Dinky5 | hx1k | serial | 729 | 60.44 | ~20 | 1 |
 | Tangy5 | hx1k | barrel | 836 | 50.95 | ~25 | 1 |
-| Twisty5 | hx1k | barrel| 1188 | 68.33 | ~16 | 4 |
+| Twisty5 | hx1k | barrel| 1177 | 68.33 | ~16 | 4 |
 
 # License / copyright
 
