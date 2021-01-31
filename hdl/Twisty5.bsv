@@ -105,9 +105,6 @@ typedef struct {
 // Data on stage 1's input register.
 typedef struct {
     CoreState#(addr_width) cs;
-    // Cached result of last memory read, often an instruction but sometimes
-    // data - depends on the execution state.
-    Word cache;
 } Stage1#(numeric type addr_width) deriving (Bits, FShow);
 
 // Data on stage 2's input register.
@@ -137,6 +134,8 @@ typedef struct {
     CoreState#(addr_width) cs;
     // If Valid, gives the register and data to write to the register file.
     Maybe#(Tuple2#(RegId, Word)) rf_write;
+    // Bus transaction to be issued in stage4.
+    Tuple2#(Bit#(addr_width), Vector#(4, Maybe#(Bit#(8)))) bus_tx;
 } Stage4#(numeric type addr_width) deriving (Bits, FShow);
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -158,7 +157,15 @@ provisos (
     // four harts to ResetState, each PC to the appropriate reset vector, and
     // hart 0 ready to go in stage 3 so it will fetch first.
     Pipe#(Stage1#(addr_width), Stage2#(addr_width)) s1mod <-
-        mkStage1(regfile, Stage1
+        mkStage1(regfile, bus, Stage1
+            { cs: CoreState
+                { hart: 3
+                , pc: 3 * 2
+                , state: tagged ResetState
+                }
+            });
+    Pipe#(Stage2#(addr_width), Stage3#(addr_width)) s2mod <-
+        mkStage2(regfile, Stage2
             { cs: CoreState
                 { hart: 2
                 , pc: 2 * 2
@@ -166,20 +173,11 @@ provisos (
                 }
             , cache: 0
             });
-    Pipe#(Stage2#(addr_width), Stage3#(addr_width)) s2mod <-
-        mkStage2(regfile, Stage2
+    Pipe#(Stage3#(addr_width), Stage4#(addr_width)) s3mod <-
+        mkStage3(Stage3
             { cs: CoreState
                 { hart: 1
                 , pc: 1 * 2
-                , state: tagged ResetState
-                }
-            , cache: 0
-            });
-    Pipe#(Stage3#(addr_width), Stage4#(addr_width)) s3mod <-
-        mkStage3(bus, Stage3
-            { cs: CoreState
-                { hart: 0
-                , pc: 0 * 2
                 , state: tagged ResetState
                 }
             , cache: 0
@@ -191,11 +189,12 @@ provisos (
     Pipe#(Stage4#(addr_width), Stage1#(addr_width)) s4mod <-
         mkStage4(regfile, bus, Stage4
             { cs: CoreState
-                { hart: 3
-                , pc: 3 * 2
+                { hart: 0
+                , pc: 0 * 2
                 , state: tagged ResetState
                 }
             , rf_write: tagged Invalid
+            , bus_tx: tuple2(3 * 2, replicate(tagged Invalid))
             });
 
     mkConnection(s1mod.out, s2mod.feed);
@@ -225,6 +224,7 @@ endinterface
 
 module mkStage1#(
     RegFile2H regfile,
+    TwistyBus#(aw) bus,
     Stage1#(aw) start_state
 ) (Pipe#(Stage1#(aw), Stage2#(aw)));
     let s <- mkReg(start_state);
@@ -232,11 +232,11 @@ module mkStage1#(
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule do_stage_1;
-        InstFields fields = unpack(s.cache);
+        InstFields fields = unpack(bus.response);
         regfile.read(s.cs.hart, fields.rs1, fields.rs2);
         stage2 <= Stage2
             { cs: s.cs
-            , cache: s.cache
+            , cache: bus.response
             };
     endrule
 
@@ -302,7 +302,6 @@ endmodule
 // Stage 3 module
 
 module mkStage3#(
-    TwistyBus#(aw) bus,
     Stage3#(aw) start_state
 ) (Pipe#(Stage3#(aw), Stage4#(aw)))
 provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
@@ -328,8 +327,8 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                 , state: tagged RunState
                 }
             , rf_write: tagged Invalid
+            , bus_tx: tuple2(s.cs.pc, no_write)
             };
-        bus.issue(s.cs.pc, no_write);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -482,8 +481,8 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                 , state: next_state
                 }
             , rf_write: rf_write
+            , bus_tx: tuple2(a, mem_write_data)
             };
-        bus.issue(a, mem_write_data);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
@@ -512,14 +511,17 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                 , state: tagged RunState
                 }
             , rf_write: tagged Valid tuple2(f.rd, val)
+            , bus_tx: tuple2(s.cs.pc, no_write)
             };
-        bus.issue(s.cs.pc, no_write);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule do_stage3_halt (s.cs.state matches tagged HaltState);
-        stage4 <= Stage4 { cs: s.cs, rf_write: tagged Invalid };
-        bus.issue(s.cs.pc, no_write);
+        stage4 <= Stage4
+            { cs: s.cs
+            , rf_write: tagged Invalid
+            , bus_tx: tuple2(s.cs.pc, no_write)
+            };
     endrule
 
     interface Put feed = toPut(asReg(s));
@@ -540,13 +542,13 @@ module mkStage4#(
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule do_stage_4;
-        let response = bus.response;
+        bus.issue(tpl_1(s.bus_tx), tpl_2(s.bus_tx));
+
         if (s.rf_write matches tagged Valid {.rd, .value})
             regfile.write(s.cs.hart, rd, value);
 
         stage1 <= Stage1
             { cs: s.cs
-            , cache: response
             };
     endrule
 
