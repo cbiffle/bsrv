@@ -502,7 +502,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                 let b = shifted[15:0];
                 return zext ? extend(b) : signExtend(b);
             end
-            default: s.cache;
+            default: shifted;
         endcase;
         stage4 <= Stage4
             { cs: CoreState
