@@ -397,7 +397,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                     'b101: return !signed_less_than;
                     'b110: return unsigned_less_than;
                     'b111: return !unsigned_less_than;
-                    default: return ?;
+                    default: return False;
                 endcase;
                 if (condition) next_pc = crop_addr(extend(pc00) + imm_b);
             end
