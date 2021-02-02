@@ -127,6 +127,8 @@ typedef struct {
     Bit#(25) diff_lo;
     // Record of the value used on the right hand side of the comparator.
     Word rhs;
+    // Output from the barrel shifter.
+    Word shifter_out;
 } Stage3#(numeric type addr_width) deriving (Bits, FShow);
 
 // Data on stage 4's input register.
@@ -185,6 +187,7 @@ provisos (
             , x2: 0
             , diff_lo: 0
             , rhs: 0
+            , shifter_out: 0
             });
     Pipe#(Stage4#(addr_width), Stage1#(addr_width)) s4mod <-
         mkStage4(regfile, bus, Stage4
@@ -255,6 +258,8 @@ module mkStage2#(
     let s <- mkReg(start_state);
     let stage3 <- mkBypassWire;
 
+    let barrel_shifter <- mkUniqueWrapper(barrel_shift_datapath);
+
     (* fire_when_enabled, no_implicit_conditions *)
     rule do_stage_2;
         // We're going to assume the cache contents are an instruction. If we're
@@ -283,6 +288,13 @@ module mkStage2#(
         // Get the comparison started one cycle early.
         let diff_lo = {1'b0, x1[23:0]} + {1'b1, ~comp_rhs[23:0]} + 1;
 
+        let shift_args = case (s.cs.state) matches
+            RunState: tuple4(x1, comp_rhs[4:0], unpack(fields.funct3[2]), fields.funct7[5] == 1);
+            tagged LoadState { lsbs: .lsbs }: tuple4(s.cache, {lsbs, 3'b0}, ShiftDir'(Right), ?);
+        endcase;
+
+        let shifter_out <- barrel_shifter.func(shift_args);
+
         stage3 <= Stage3
             { cs: s.cs
             , cache: s.cache
@@ -290,6 +302,7 @@ module mkStage2#(
             , x2: x2
             , diff_lo: diff_lo
             , rhs: comp_rhs
+            , shifter_out: shifter_out
             };
     endrule
 
@@ -309,8 +322,6 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
     let stage4 <- mkBypassWire;
 
     let no_write = replicate(tagged Invalid);
-
-    let barrel_shifter <- mkUniqueWrapper(barrel_shift_datapath);
 
     // Crops a Word value for use as a smaller word address of addr_width bits.
     function Bit#(aw) crop_addr(Word addr);
@@ -451,9 +462,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                     end
                     // Left shift
                     'b001: begin
-                        let x <- barrel_shifter.func(tuple4(
-                            s.x1, s.rhs[4:0], Left, ?));
-                        alu_result = x;
+                        alu_result = s.shifter_out;
                     end
                     // SLTI / SLT
                     'b010: alu_result = signed_less_than ? 1 : 0;
@@ -461,9 +470,7 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
                     'b011: alu_result = unsigned_less_than ? 1 : 0;
                     'b100: alu_result = s.x1 ^ s.rhs; // XORI / XOR
                     'b101: begin
-                        let x <- barrel_shifter.func(tuple4(
-                            s.x1, s.rhs[4:0], Right, fields.funct7[5] == 1));
-                        alu_result = x;
+                        alu_result = s.shifter_out;
                     end
                     'b110: alu_result = s.x1 | s.rhs; // ORI / OR
                     'b111: alu_result = s.x1 & s.rhs; // ANDI / AND
@@ -490,19 +497,16 @@ provisos (Add#(xlen_m2, 2, XLEN), Add#(aw, dropped_msbs, xlen_m2));
         let size = f.saved_funct3[1:0];
         let zext = f.saved_funct3[2] == 1;
 
-        let shifted <- barrel_shifter.func(tuple4(
-            s.cache, {f.lsbs, 3'b0}, Right, ?));
-
         let val = case (size) matches
             'b00: begin
-                let b = shifted[7:0];
+                let b = s.shifter_out[7:0];
                 return zext ? extend(b) : signExtend(b);
             end
             'b01: begin
-                let b = shifted[15:0];
+                let b = s.shifter_out[15:0];
                 return zext ? extend(b) : signExtend(b);
             end
-            default: shifted;
+            default: return s.shifter_out;
         endcase;
         stage4 <= Stage4
             { cs: CoreState
