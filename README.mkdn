@@ -26,6 +26,12 @@ correct).
 This is mostly for my reference, when I return to this project later wondering
 about the results. Numbers may be out of date.
 
+**Edit:** I've realized two years later that these sizes are underestimates,
+because my synthesis tools were getting _clever_ and noticing constant bits in
+the test program I was loading into block RAM. So, these have dropped some
+instructions that the tools noticed could not occur. Metrics are hard. Anyway,
+here are the original numbers:
+
 | Core | Target | Shifter | # LCs | fmax (MHz) | MIPS/thread | #threads |
 | :--- | :----- | ------: | ----: | ---------: | ----------: | -------: |
 | Corny5 | hx1k | barrel | 1182 | 53.74 | ~27 | 1 |
